@@ -11,11 +11,14 @@
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.11",
+    "@turf/turf": "^7.2.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.525.0",
+    "maplibre-gl": "^5.6.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-map-gl": "^8.0.4",
     "tailwind-merge": "^3.3.1",
     "tailwindcss": "^4.1.11"
   },
