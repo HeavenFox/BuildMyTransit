@@ -318,7 +318,7 @@ export class Train {
   baseDeceleration: number = 2; // m/s^2
   emergencyDeceleration: number = 5; // m/s^2
   // Block signaling thresholds (in km)
-  slowDownDistance: number = 1; // Start slowing down if train ahead is within 1km
+  slowDownDistance: number = 0.6; // Start slowing down if train ahead is within 600m
   emergencyDistance: number = 0.3; // Emergency braking if train ahead is within 300m
 
   constructor(

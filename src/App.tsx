@@ -78,8 +78,8 @@ function App() {
         "case",
         ["==", ["get", "id"], selectedTrainId || ""],
         "#8b5cf6", // Purple for selected train
-        ["<", ["get", "acceleration"], -3],
-        "#ef4444", // Red for emergency braking
+        ["==", ["get", "velocity"], 0],
+        "#ef4444", // Red for stopped trains
         ["<", ["get", "acceleration"], -0.5],
         "#f59e0b", // Orange for slowing down
         "#10b981", // Green for normal operation
@@ -241,7 +241,7 @@ function App() {
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-red-500 rounded-full"></div>
-                <span>Emergency Braking</span>
+                <span>Stopped</span>
               </div>
             </div>
           </div>
