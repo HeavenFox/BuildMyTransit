@@ -18,6 +18,10 @@ function App() {
     stopSimulation,
     addTrain,
     clearTrains,
+    selectedTrainId,
+    selectedTrain,
+    selectTrain,
+    getSelectedTrainRoute,
   } = useTrainSimulation(data);
 
   if (loading) {
@@ -65,16 +69,39 @@ function App() {
     paint: {
       "circle-color": [
         "case",
+        ["==", ["get", "id"], selectedTrainId || ""],
+        "#8b5cf6", // Purple for selected train
         ["<", ["get", "acceleration"], -3],
         "#ef4444", // Red for emergency braking
         ["<", ["get", "acceleration"], -0.5],
         "#f59e0b", // Orange for slowing down
         "#10b981", // Green for normal operation
       ],
-      "circle-radius": 8,
+      "circle-radius": [
+        "case",
+        ["==", ["get", "id"], selectedTrainId || ""],
+        10, // Larger radius for selected train
+        8,
+      ],
       "circle-opacity": 0.9,
-      "circle-stroke-width": 2,
+      "circle-stroke-width": [
+        "case",
+        ["==", ["get", "id"], selectedTrainId || ""],
+        3, // Thicker stroke for selected train
+        2,
+      ],
       "circle-stroke-color": "#ffffff",
+    },
+  };
+
+  const routeLayerStyle: LayerProps = {
+    id: "selected-train-route",
+    type: "line",
+    paint: {
+      "line-color": "#8b5cf6",
+      "line-width": 4,
+      "line-opacity": 0.8,
+      "line-dasharray": [2, 2],
     },
   };
 
@@ -114,6 +141,24 @@ function App() {
         };
       }),
   };
+
+  // Handle map click to select trains
+  const handleMapClick = (event: any) => {
+    const features = event.features;
+    if (features && features.length > 0) {
+      const clickedFeature = features[0];
+      if (clickedFeature.layer.id === "trains") {
+        const trainId = clickedFeature.properties.id;
+        selectTrain(selectedTrainId === trainId ? null : trainId);
+      }
+    } else {
+      // Clicked on empty area, deselect train
+      selectTrain(null);
+    }
+  };
+
+  // Get selected train route GeoJSON
+  const selectedTrainRoute = getSelectedTrainRoute();
 
   return (
     <div className="w-full h-screen relative">
@@ -169,6 +214,10 @@ function App() {
             <h3 className="text-sm font-medium mb-2">Train Status</h3>
             <div className="space-y-1 text-xs">
               <div className="flex items-center gap-2">
+                <div className="w-3 h-3 bg-purple-500 rounded-full"></div>
+                <span>Selected Train</span>
+              </div>
+              <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-green-500 rounded-full"></div>
                 <span>Normal Operation</span>
               </div>
@@ -182,12 +231,53 @@ function App() {
               </div>
             </div>
           </div>
-          {trains.length > 0 && (
+          {selectedTrain ? (
+            <div className="border-t pt-2 mt-2">
+              <h3 className="text-sm font-medium mb-2">Selected Train</h3>
+              <div className="bg-purple-50 p-2 rounded border-2 border-purple-200">
+                <div className="font-medium text-purple-800">
+                  {selectedTrain.id}
+                </div>
+                <div className="text-sm text-purple-700">
+                  Speed: {(selectedTrain.velocity * 2.23694).toFixed(1)} mph
+                </div>
+                <div className="text-sm text-purple-700">
+                  Accel: {selectedTrain.acceleration.toFixed(2)} m/s²
+                </div>
+                <div className="text-sm text-purple-700">
+                  Route Pos: {selectedTrain.routePosition.toFixed(2)} km
+                </div>
+                <div className="text-sm text-purple-700">
+                  Way ID: {selectedTrain.wayId}
+                </div>
+                <button
+                  onClick={() => selectTrain(null)}
+                  className="mt-2 text-xs px-2 py-1 bg-purple-500 text-white rounded hover:bg-purple-600"
+                >
+                  Deselect
+                </button>
+              </div>
+            </div>
+          ) : (
             <div className="border-t pt-2 mt-2">
               <h3 className="text-sm font-medium mb-2">Train Details</h3>
+              <div className="text-xs text-gray-500 text-center py-2">
+                Click on a train to see its details and route
+              </div>
+            </div>
+          )}
+          {!selectedTrain && trains.length > 0 && (
+            <div className="border-t pt-2 mt-2">
+              <h3 className="text-sm font-medium mb-2">
+                All Trains ({trains.length})
+              </h3>
               <div className="max-h-32 overflow-y-auto space-y-1 text-xs">
                 {trains.slice(0, 3).map((train) => (
-                  <div key={train.id} className="bg-gray-50 p-2 rounded">
+                  <div
+                    key={train.id}
+                    className="bg-gray-50 p-2 rounded cursor-pointer hover:bg-gray-100"
+                    onClick={() => selectTrain(train.id)}
+                  >
                     <div className="font-medium">{train.id}</div>
                     <div>
                       Speed: {(train.velocity * 2.23694).toFixed(1)} mph
@@ -215,6 +305,8 @@ function App() {
         }}
         style={{ width: "100%", height: "100%" }}
         mapStyle="https://tiles.versatiles.org/assets/styles/graybeard/style.json"
+        onClick={handleMapClick}
+        interactiveLayerIds={["trains"]}
       >
         {/* Render subway ways */}
         {waysGeoJSON && (
@@ -234,6 +326,17 @@ function App() {
         {trains.length > 0 && (
           <Source id="trains" type="geojson" data={trainsGeoJSON}>
             <Layer {...trainsLayerStyle} />
+          </Source>
+        )}
+
+        {/* Render selected train route */}
+        {selectedTrainRoute && (
+          <Source
+            id="selected-train-route"
+            type="geojson"
+            data={selectedTrainRoute}
+          >
+            <Layer {...routeLayerStyle} />
           </Source>
         )}
       </Map>
