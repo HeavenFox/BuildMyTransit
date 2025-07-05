@@ -24,6 +24,13 @@ function App() {
     getSelectedTrainRoute,
   } = useTrainSimulation(data);
 
+  // Function to add 10 trains at once
+  const add10Trains = () => {
+    for (let i = 0; i < 10; i++) {
+      addTrain();
+    }
+  };
+
   if (loading) {
     return (
       <div className="w-full h-screen flex items-center justify-center">
@@ -183,6 +190,13 @@ function App() {
             </button>
           </div>
           <button
+            onClick={add10Trains}
+            className="flex items-center gap-2 px-3 py-2 bg-emerald-500 text-white rounded hover:bg-emerald-600 transition-colors w-full"
+          >
+            <Plus size={16} />
+            Add 10 Trains
+          </button>
+          <button
             onClick={clearTrains}
             className="flex items-center gap-2 px-3 py-2 bg-red-500 text-white rounded hover:bg-red-600 transition-colors w-full"
           >
@@ -196,7 +210,7 @@ function App() {
             <input
               type="range"
               min="0.1"
-              max="5"
+              max="20"
               step="0.1"
               value={simulationRate}
               onChange={(e) => setSimulationRate(parseFloat(e.target.value))}
@@ -204,7 +218,7 @@ function App() {
             />
             <div className="flex justify-between text-xs text-gray-500 mt-1">
               <span>0.1x</span>
-              <span>5x</span>
+              <span>20x</span>
             </div>
           </div>
           <div className="text-sm text-gray-600 mt-2">

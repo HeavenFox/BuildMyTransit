@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check-network": "tsx data/check_network.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.11",
