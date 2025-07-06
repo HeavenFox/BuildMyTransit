@@ -153,6 +153,7 @@ export class Infra {
 // TrainRoute class to represent a series of connected way sections
 export class TrainRoute {
   waySections: WaySection[];
+  stopNodeIds: string[] = []; // List of stop node IDs
   totalDistance: number;
   sectionDistances: Map<WaySection, number>; // Cumulative distance to start of each section
   infra: Infra;
@@ -160,6 +161,17 @@ export class TrainRoute {
   name: string = "";
   bullet: string = "";
   color: string = "#000000"; // Default color
+
+  // Cache the route line for stop calculations
+  private routeLine: GeoJSON.Feature<GeoJSON.LineString> | null = null;
+
+  // Cache stop positions along the route for efficient distance calculations
+  private cachedStopPositions: Array<{
+    nodeId: string;
+    routePosition: number;
+    coordinates: [number, number];
+    pointOnRoute: GeoJSON.Feature<GeoJSON.Point>;
+  }> | null = null;
 
   private constructor(infra: Infra) {
     this.waySections = [];
@@ -176,6 +188,7 @@ export class TrainRoute {
     route.name = service.name;
     route.bullet = service.bullet;
     route.color = service.color;
+    route.stopNodeIds = service.stop_node_ids;
 
     // console.group(`Building route for service ${service.name}`);
     // console.log(service.route_way_ids);
@@ -246,6 +259,62 @@ export class TrainRoute {
     this.totalDistance = cumulativeDistance;
   }
 
+  // Cache stop positions along the route for efficient distance calculations
+  private cacheStopPositions(): void {
+    if (!this.stopNodeIds || this.stopNodeIds.length === 0) {
+      this.cachedStopPositions = [];
+      return;
+    }
+
+    const routeLine = this.getRouteLine();
+    if (!routeLine) {
+      this.cachedStopPositions = [];
+      return;
+    }
+
+    const stops: Array<{
+      nodeId: string;
+      routePosition: number;
+      coordinates: [number, number];
+      pointOnRoute: GeoJSON.Feature<GeoJSON.Point>;
+    }> = [];
+
+    // Find the position of each stop along the route
+    for (const stopNodeId of this.stopNodeIds) {
+      const stopCoords = this.infra.getNodeCoords(stopNodeId);
+      if (!stopCoords) continue;
+
+      const stopPoint = turf.point(stopCoords);
+
+      // Find the nearest point on the route line to this stop
+      const nearestPoint = turf.nearestPointOnLine(routeLine, stopPoint);
+
+      // Get the distance along the route to this nearest point
+      const routePosition = Math.max(
+        0,
+        nearestPoint.properties.location - 0.075
+      ); // Platforms are ~150m long, so adjust to center
+
+      stops.push({
+        nodeId: stopNodeId,
+        routePosition,
+        coordinates: stopCoords,
+        pointOnRoute: nearestPoint,
+      });
+    }
+
+    // Sort stops by their position along the route
+    stops.sort((a, b) => a.routePosition - b.routePosition);
+
+    this.cachedStopPositions = stops;
+  }
+
+  // Force recalculation of cached stop positions if needed
+  public invalidateStopCache(): void {
+    this.cachedStopPositions = null;
+    this.cacheStopPositions();
+  }
+
   // Get position along the entire route given way and distance along that way
   getRoutePosition(wayId: string, distanceAlongWay: number): number {
     // Find the way section that contains this wayId
@@ -299,9 +368,93 @@ export class TrainRoute {
   getWayIds(): string[] {
     return this.waySections.map((section) => section.wayId);
   }
+
+  getCachedStopPositions() {
+    if (!this.cachedStopPositions) {
+      this.cacheStopPositions();
+    }
+
+    if (!this.cachedStopPositions || this.cachedStopPositions.length === 0) {
+      return [];
+    }
+
+    return this.cachedStopPositions;
+  }
+
+  // Get the next stop ahead of the given route position
+  getNextStopAhead(
+    currentRoutePosition: number,
+    lastStopId: string | null = null
+  ): {
+    nodeId: string;
+    routePosition: number;
+    coordinates: [number, number];
+    distance: number;
+  } | null {
+    const cachedStopPositions = this.getCachedStopPositions();
+
+    // Find the first stop that's ahead of the current position
+    for (const stop of cachedStopPositions) {
+      // Skip if this stop is the last one we just departed from
+      if (lastStopId && stop.nodeId === lastStopId) {
+        continue;
+      }
+      if (stop.routePosition > currentRoutePosition) {
+        return {
+          nodeId: stop.nodeId,
+          routePosition: stop.routePosition,
+          coordinates: stop.coordinates,
+          distance: stop.routePosition - currentRoutePosition,
+        };
+      }
+    }
+
+    return null;
+  }
+
+  // Get or build the route line for stop calculations
+  private getRouteLine(): GeoJSON.Feature<GeoJSON.LineString> | null {
+    if (this.routeLine) {
+      return this.routeLine;
+    }
+
+    // Build the complete route line as a single LineString
+    const routeCoordinates: [number, number][] = [];
+
+    for (const waySection of this.waySections) {
+      const coordinates = waySection.getCoordinates();
+      if (coordinates.length < 2) continue;
+
+      // Add coordinates to route, avoiding duplicates at connections
+      if (routeCoordinates.length === 0) {
+        routeCoordinates.push(...coordinates);
+      } else {
+        // Skip first coordinate if it's the same as the last one we added
+        const lastCoord = routeCoordinates[routeCoordinates.length - 1];
+        const firstCoord = coordinates[0];
+        if (lastCoord[0] !== firstCoord[0] || lastCoord[1] !== firstCoord[1]) {
+          routeCoordinates.push(...coordinates);
+        } else {
+          routeCoordinates.push(...coordinates.slice(1));
+        }
+      }
+    }
+
+    if (routeCoordinates.length < 2) {
+      return null;
+    }
+
+    this.routeLine = turf.lineString(routeCoordinates);
+    return this.routeLine;
+  }
 }
 
 // Train class to represent individual trains
+// Now includes stop functionality:
+// - Trains will automatically slow down and stop at stations defined in their route
+// - They will dwell at stops for a configurable amount of time (dwellTime)
+// - During dwell time, trains remain stationary with velocity = 0
+// - After dwell time expires, trains resume normal operation
 export class Train {
   id: string;
 
@@ -330,9 +483,21 @@ export class Train {
   slowDownDistance: number = 0.6; // Start slowing down if train ahead is within 600m
   emergencyDistance: number = 0.3; // Emergency braking if train ahead is within 300m
 
+  // Stop management
+  isAtStop: boolean = false;
+  stopDwellTime: number = 10; // Default dwell time in seconds
+  remainingDwellTime: number = 0;
+  stopApproachDistance: number = 0.1; // Distance to start slowing down for stops (100m)
+  lastStopNodeId: string | null = null; // Track the last stop to prevent immediate re-stopping
+
   infra: Infra;
 
-  constructor(id: string, infra: Infra, route: TrainRoute) {
+  constructor(
+    id: string,
+    infra: Infra,
+    route: TrainRoute,
+    dwellTime: number = 10
+  ) {
     this.id = id;
     this.waySection = route.waySections[0];
     this.distanceAlongKm = 0;
@@ -345,6 +510,7 @@ export class Train {
       this.waySection.wayId,
       this.distanceAlongKm
     );
+    this.stopDwellTime = dwellTime;
 
     this.infra = infra;
 
@@ -354,31 +520,52 @@ export class Train {
 
   // Update train position based on velocity and time
   update(deltaTime: number, infra: Infra, otherTrains: Train[]): boolean {
+    // Handle dwell time if train is at a stop
+    if (this.isAtStop) {
+      if (this.remainingDwellTime > 0) {
+        this.remainingDwellTime -= deltaTime;
+        return false; // Still dwelling, do not update position
+      } else {
+        // Finished dwelling, ready to depart
+        this.isAtStop = false;
+        this.remainingDwellTime = 0;
+      }
+    }
+
     // Calculate distance to nearest train ahead
     const distanceToTrainAhead = this.getDistanceToTrainAhead(
       otherTrains,
       infra
     );
 
-    // Determine acceleration based on block signaling
-    this.calculateAcceleration(distanceToTrainAhead);
+    // Calculate distance to next stop
+    const { distance: distanceToNextStop, stopNodeId: nextStopNodeId } =
+      this.getDistanceToNextStop();
+
+    // Determine acceleration based on block signaling and stops
+    this.calculateAcceleration(distanceToTrainAhead, distanceToNextStop);
 
     // Apply acceleration
     this.velocity += this.acceleration * deltaTime;
 
-    // Apply some basic physics constraints
-    const maxSpeed = 60 / 2.23694; // 60 mph in m/s
-    this.velocity = Math.min(Math.max(this.velocity, 0), maxSpeed);
+    this.velocity = Math.max(this.velocity, 0);
 
     // Move the train (always forward)
     const distanceToMove = (this.velocity * deltaTime) / 1000; // Convert to km
     this.distanceAlongKm += distanceToMove;
     this.routePosition += distanceToMove;
 
+    // Check if we've reached or passed the stop position
+    // Use a small tolerance (5m) to account for simulation precision
+    if (distanceToNextStop <= 0.005) {
+      this.isAtStop = true;
+      this.lastStopNodeId = nextStopNodeId;
+      this.remainingDwellTime = this.stopDwellTime;
+    }
+
     // Update coordinates
     this.updateCoordinates();
 
-    // Check if train has reached the end of the way
     return this.hasReachedEnd(infra);
   }
 
@@ -457,42 +644,71 @@ export class Train {
     return Number.MAX_SAFE_INTEGER;
   }
 
-  // Calculate acceleration based on distance to train ahead
-  private calculateAcceleration(distanceToTrainAhead: number): void {
-    // Calculate braking distance based on current velocity
+  // Calculate acceleration based on distance to train ahead and stops
+  private calculateAcceleration(
+    distanceToTrainAhead: number,
+    distanceToNextStop?: number
+  ): void {
+    const maxSpeed = 60 / 2.23694; // 60 mph in m/s
+
+    // Calculate braking distances based on current velocity
     const brakingDistance =
       (this.velocity * this.velocity) / (2 * this.baseDeceleration * 1000); // Convert to km
     const emergencyBrakingDistance =
       (this.velocity * this.velocity) / (2 * this.emergencyDeceleration * 1000); // Convert to km
 
-    // Adjust thresholds based on current velocity
-    const adjustedSlowDownDistance = Math.max(
-      this.slowDownDistance,
-      brakingDistance + 0.2
-    ); // Add safety margin
-    const adjustedEmergencyDistance = Math.max(
-      this.emergencyDistance,
-      emergencyBrakingDistance + 0.1
-    ); // Add safety margin
+    // Array to collect all acceleration constraints
+    const accelerationOptions: number[] = [];
 
-    if (distanceToTrainAhead <= adjustedEmergencyDistance) {
-      // Emergency braking
-      this.acceleration = -this.emergencyDeceleration;
-    } else if (distanceToTrainAhead <= adjustedSlowDownDistance) {
-      // Gradual slowdown based on distance
-      const slowDownFactor =
-        (distanceToTrainAhead - adjustedEmergencyDistance) /
-        (adjustedSlowDownDistance - adjustedEmergencyDistance);
-      this.acceleration = -this.baseDeceleration * (1 - slowDownFactor * 0.5); // Smoother slowdown
-    } else {
-      // Normal acceleration if no train ahead or far enough
-      if (this.velocity < 20) {
-        // Target speed of about 45 mph
-        this.acceleration = this.baseAcceleration;
-      } else {
-        this.acceleration = 0; // Coast at target speed
-      }
+    // 1. Base acceleration
+    accelerationOptions.push(this.baseAcceleration);
+
+    // 2. Zero acceleration if at or above max speed
+    if (this.velocity >= maxSpeed) {
+      accelerationOptions.push(0);
     }
+
+    // 3. Base deceleration if train in front is closer than braking distance
+    if (distanceToTrainAhead <= brakingDistance) {
+      accelerationOptions.push(-this.baseDeceleration);
+    }
+
+    // 4. Emergency deceleration if train in front is closer than emergency braking distance
+    if (distanceToTrainAhead <= emergencyBrakingDistance) {
+      accelerationOptions.push(-this.emergencyDeceleration);
+    }
+
+    // 5. Stop-based acceleration calculation
+    if (
+      distanceToNextStop !== undefined &&
+      distanceToNextStop < Number.MAX_SAFE_INTEGER &&
+      this.velocity > 0
+    ) {
+      // Calculate what acceleration would bring us to a stop exactly at the stop location
+      // Using kinematic equation: v² = u² + 2as, where v=0 (final velocity), u=current velocity, s=distance
+      // Solving for a: a = -u²/(2s)
+      const distanceToStopInMeters = distanceToNextStop * 1000; // Convert km to meters
+      const requiredDeceleration =
+        -(this.velocity * this.velocity) / (2 * distanceToStopInMeters);
+
+      if (requiredDeceleration > -this.baseDeceleration) {
+        // We need less deceleration than base, so we can speed up, or at least not slow down
+        accelerationOptions.push(
+          Math.min(this.baseAcceleration, this.acceleration + 0.5)
+        );
+      } else if (requiredDeceleration <= -this.emergencyDeceleration) {
+        // We need more deceleration than emergency, use emergency
+        accelerationOptions.push(-this.emergencyDeceleration);
+      } else {
+        // Use the calculated deceleration
+        accelerationOptions.push(requiredDeceleration);
+      }
+      console.log(requiredDeceleration);
+    }
+
+    // The final acceleration is the minimum (most restrictive) of all options
+    this.acceleration = Math.min(...accelerationOptions);
+    console.log("Result: ", this.acceleration);
   }
 
   // Update the train's coordinates based on its position along the way
@@ -602,6 +818,26 @@ export class Train {
 
     return true;
   }
+
+  // Calculate distance to the next stop on the route
+  private getDistanceToNextStop(): {
+    distance: number;
+    stopNodeId: string | null;
+  } {
+    const nextStop = this.route.getNextStopAhead(
+      this.routePosition,
+      this.lastStopNodeId
+    );
+
+    if (!nextStop) {
+      return { distance: Number.MAX_SAFE_INTEGER, stopNodeId: null };
+    }
+
+    return {
+      distance: nextStop.distance,
+      stopNodeId: nextStop.nodeId,
+    };
+  }
 }
 
 // Train manager to handle multiple trains
@@ -617,7 +853,7 @@ export class TrainManager {
   }
 
   // Add a new train at a random location
-  addTrain(route: TrainRoute): string | null {
+  addTrain(route: TrainRoute, dwellTime: number = 10): string | null {
     const wayIds = this.infra.getAllWayIds();
     if (wayIds.length === 0) return null;
 
@@ -628,7 +864,7 @@ export class TrainManager {
     if (!way || way.nodes.length < 2) return null;
 
     const trainId = `train-${this.nextTrainId++}`;
-    const train = new Train(trainId, this.infra, route);
+    const train = new Train(trainId, this.infra, route, dwellTime);
 
     // Set initial velocity and acceleration
     train.velocity = 0; // Start with 0 m/s
@@ -687,6 +923,7 @@ export function useTrainSimulation(
   const [trains, setTrains] = useState<Train[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [simulationRate, setSimulationRate] = useState(1);
+  const [dwellTime, setDwellTime] = useState(10); // Default dwell time in seconds
   const [infra, setInfra] = useState<Infra | null>(null);
   const lastUpdateTime = useRef<number>(Date.now());
   const animationFrameId = useRef<number | undefined>(undefined);
@@ -749,9 +986,9 @@ export function useTrainSimulation(
   // Functions to control simulation
   const startSimulation = () => setIsRunning(true);
   const stopSimulation = () => setIsRunning(false);
-  const addTrain = (route: TrainRoute) => {
+  const addTrain = (route: TrainRoute, customDwellTime?: number) => {
     if (trainManager) {
-      trainManager.addTrain(route);
+      trainManager.addTrain(route, customDwellTime ?? dwellTime);
       setTrains(trainManager.getAllTrains());
     }
   };
@@ -822,6 +1059,8 @@ export function useTrainSimulation(
     isRunning,
     simulationRate,
     setSimulationRate,
+    dwellTime,
+    setDwellTime,
     startSimulation,
     stopSimulation,
     addTrain,

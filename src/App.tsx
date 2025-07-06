@@ -52,6 +52,8 @@ function App() {
     isRunning,
     simulationRate,
     setSimulationRate,
+    dwellTime,
+    setDwellTime,
     startSimulation,
     stopSimulation,
     addTrain,
@@ -148,6 +150,8 @@ function App() {
         "case",
         ["==", ["get", "id"], selectedTrainId || ""],
         "#8b5cf6", // Purple for selected train
+        ["==", ["get", "isAtStop"], true],
+        "#3b82f6", // Blue for trains at stops
         ["==", ["get", "velocity"], 0],
         "#ef4444", // Red for stopped trains
         ["<", ["get", "acceleration"], -0.5],
@@ -210,6 +214,8 @@ function App() {
             wayId: train.waySection.wayId,
             routePosition: train.routePosition,
             bearing: bearingDegrees,
+            isAtStop: train.isAtStop,
+            remainingDwellTime: train.remainingDwellTime,
           },
           geometry: {
             type: "Point",
@@ -291,6 +297,24 @@ function App() {
               <span>20x</span>
             </div>
           </div>
+          <div className="border-t pt-2 mt-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Dwell Time: {dwellTime}s
+            </label>
+            <input
+              type="range"
+              min="1"
+              max="60"
+              step="1"
+              value={dwellTime}
+              onChange={(e) => setDwellTime(parseInt(e.target.value))}
+              className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+            />
+            <div className="flex justify-between text-xs text-gray-500 mt-1">
+              <span>1s</span>
+              <span>60s</span>
+            </div>
+          </div>
           <div className="text-sm text-gray-600 mt-2">
             Active Trains: {trains.length}
           </div>
@@ -313,6 +337,10 @@ function App() {
                 <div className="w-3 h-3 bg-red-500 rounded-full"></div>
                 <span>Stopped</span>
               </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 bg-blue-500 rounded-full"></div>
+                <span>At Station</span>
+              </div>
             </div>
           </div>
           {selectedTrain ? (
@@ -334,6 +362,12 @@ function App() {
                 <div className="text-sm text-purple-700">
                   Way ID: {selectedTrain.waySection.wayId}
                 </div>
+                {selectedTrain.isAtStop && (
+                  <div className="text-sm text-red-700 font-medium">
+                    At Stop: {selectedTrain.remainingDwellTime.toFixed(1)}s
+                    remaining
+                  </div>
+                )}
                 <button
                   onClick={() => selectTrain(null)}
                   className="mt-2 text-xs px-2 py-1 bg-purple-500 text-white rounded hover:bg-purple-600"
@@ -366,17 +400,41 @@ function App() {
               ))}
             </div>
             {expandedBullet && (
-              <div className="ml-4 space-y-1 mt-1">
+              <div className="space-y-1 mt-1">
                 {routesByBullet[expandedBullet].map((route, index) => (
                   <div
                     key={index}
                     className="flex items-center gap-2 p-1 bg-gray-50 rounded"
                   >
-                    <div className="flex-1 min-w-0">
-                      <div className="text-xs font-medium text-gray-800 truncate">
-                        {route.name.replace(/^NYCS - /, "")}
-                      </div>
-                    </div>
+                    {((name) => {
+                      if (name.includes(":")) {
+                        const [title, direction] = name.split(":", 2);
+                        return (
+                          <div className="flex-1 min-w-0">
+                            <div className="text-sm font-medium text-gray-800 truncate">
+                              {title.trim()}
+                            </div>
+                            {direction
+                              .trim()
+                              .split(/\s*→\s*/)
+                              .map((dir, i) => (
+                                <div
+                                  key={i}
+                                  className="text-xs font-medium text-gray-800 truncate"
+                                >
+                                  {dir}
+                                </div>
+                              ))}
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div className="text-xs font-medium text-gray-800 truncate">
+                            {name}
+                          </div>
+                        );
+                      }
+                    })(route.name.replace(/^NYCS - /, ""))}
                     <button
                       onClick={() => addTrainFromRoute(route)}
                       className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 flex-shrink-0"
