@@ -2,14 +2,15 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import Map, { Source, Layer } from "react-map-gl/maplibre";
 import { useTrainSimulation } from "../hooks/useTrainSimulation";
 import type { LayerProps } from "react-map-gl/maplibre";
-import { Play, Pause, Plus, Trash2 } from "lucide-react";
+import { Play, Pause, Plus, Trash2, PencilRuler } from "lucide-react";
 import * as turf from "@turf/turf";
 import { useState, useMemo } from "react";
 import { useAtomValue } from "jotai";
 import { userRoutesAtom } from "../store/routeStore";
-import { Infra, TrainRoute, WaySection } from "../hooks/useTrainSimulation";
+import { Infra, TrainRoute } from "../hooks/useTrainSimulation";
 import type { InfraSchema, ServiceSchema } from "../hooks/useSubwayData";
 import { RouteListItem } from "./RouteListItem";
+import { Button } from "./ui/button";
 
 interface TrainSimulatorProps {
   data: InfraSchema | null;
@@ -17,6 +18,7 @@ interface TrainSimulatorProps {
   waysGeoJSON: GeoJSON.FeatureCollection | null;
   stationsGeoJSON: GeoJSON.FeatureCollection | null;
   infra: Infra;
+  onModeChange: () => void;
 }
 
 function Bullet({
@@ -61,6 +63,7 @@ export function TrainSimulator({
   waysGeoJSON,
   stationsGeoJSON,
   infra,
+  onModeChange,
 }: TrainSimulatorProps) {
   const userRoutes = useAtomValue(userRoutesAtom);
 
@@ -265,7 +268,9 @@ export function TrainSimulator({
     <div className="w-full h-screen relative">
       {/* Control Panel */}
       <div className="absolute top-4 left-4 z-10 bg-white rounded-lg shadow-lg p-4 w-80 max-h-[calc(100vh-2rem)] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-3">Train Simulator</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">BuildMyTransit.nyc</h2>
+        </div>
         <div className="space-y-2">
           <div className="flex gap-2">
             <button
@@ -280,7 +285,7 @@ export function TrainSimulator({
               className="flex items-center gap-2 px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
             >
               <Plus size={16} />
-              Add Train
+              Add Random Train
             </button>
           </div>
           <button
@@ -288,7 +293,7 @@ export function TrainSimulator({
             className="flex items-center gap-2 px-3 py-2 bg-emerald-500 text-white rounded hover:bg-emerald-600 transition-colors w-full"
           >
             <Plus size={16} />
-            Add 10 Trains
+            Add 10 Random Trains
           </button>
           <button
             onClick={clearTrains}
@@ -457,6 +462,12 @@ export function TrainSimulator({
               </div>
             </div>
           )}
+        </div>
+        <div className="pt-2 border-t">
+          <Button onClick={onModeChange} variant="outline">
+            <PencilRuler size={16} />
+            Design Routes
+          </Button>
         </div>
       </div>
 

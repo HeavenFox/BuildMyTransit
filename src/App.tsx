@@ -3,7 +3,6 @@ import { TrainSimulator } from "./components/TrainSimulator";
 import { RouteDesigner } from "./components/RouteDesigner";
 import { useSubwayData } from "./hooks/useSubwayData";
 import { Infra } from "./hooks/useTrainSimulation";
-import { Settings, Train } from "lucide-react";
 
 function App() {
   const [mode, setMode] = useState<"simulator" | "designer">("simulator");
@@ -38,28 +37,6 @@ function App() {
 
   return (
     <div className="w-full h-screen relative">
-      {/* Mode Toggle Button */}
-      <div className="absolute top-4 right-4 z-10">
-        <button
-          onClick={() =>
-            setMode(mode === "simulator" ? "designer" : "simulator")
-          }
-          className="flex items-center gap-2 px-4 py-2 bg-white rounded-lg shadow-lg hover:bg-gray-50 transition-colors"
-        >
-          {mode === "simulator" ? (
-            <>
-              <Settings size={20} />
-              <span>Design Routes</span>
-            </>
-          ) : (
-            <>
-              <Train size={20} />
-              <span>Simulate Trains</span>
-            </>
-          )}
-        </button>
-      </div>
-
       {/* Render the appropriate mode */}
       {mode === "simulator" ? (
         <TrainSimulator
@@ -68,12 +45,14 @@ function App() {
           waysGeoJSON={waysGeoJSON}
           stationsGeoJSON={stationsGeoJSON}
           infra={infra}
+          onModeChange={() => setMode("designer")}
         />
       ) : (
         <RouteDesigner
           waysGeoJSON={waysGeoJSON}
           stationsGeoJSON={stationsGeoJSON}
           infra={infra}
+          onModeChange={() => setMode("simulator")}
         />
       )}
     </div>

@@ -18,6 +18,7 @@ import {
   Trash2,
   Undo,
   ChevronDown,
+  Train,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -46,6 +47,7 @@ interface RouteDesignerProps {
   waysGeoJSON: GeoJSON.FeatureCollection | null;
   stationsGeoJSON: GeoJSON.FeatureCollection | null;
   infra: Infra;
+  onModeChange: () => void;
 }
 
 interface TrackListItemProps {
@@ -126,8 +128,8 @@ function TrackListItem({
 
 export function RouteDesigner({
   waysGeoJSON,
-  stationsGeoJSON,
   infra,
+  onModeChange,
 }: RouteDesignerProps) {
   const setUserRoutes = useSetAtom(userRoutesAtom);
   const userRoutes = useAtomValue(userRoutesAtom);
@@ -145,11 +147,6 @@ export function RouteDesigner({
   const [selectedWayIds, setSelectedWayIds] = useState<string[]>([]);
 
   const [waySections, setWaySections] = useState<WaySection[]>([]);
-
-  const clickedWays = useMemo(
-    () => selectedWayIds.map((id) => infra.getWay(id)),
-    [selectedWayIds, infra]
-  );
 
   const mapRef = useRef<MapRef>(null);
 
@@ -472,7 +469,9 @@ export function RouteDesigner({
     <div className="w-full h-screen relative">
       {/* Control Panel */}
       <div className="absolute top-4 left-4 z-10 bg-white rounded-lg shadow-lg p-4 w-80 max-h-[calc(100vh-2rem)] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-3">Route Designer</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Route Designer</h2>
+        </div>
 
         {/* Route Settings */}
         <div className="space-y-3 mb-4">
@@ -635,7 +634,7 @@ export function RouteDesigner({
                 className="flex items-center gap-1 px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600"
               >
                 <Save size={16} />
-                Save Route
+                Save
               </button>
               <button
                 onClick={deleteLastSegment}
@@ -685,6 +684,13 @@ export function RouteDesigner({
             </div>
           </div>
         )}
+
+        <div className="pt-2 border-t mt-2">
+          <Button onClick={onModeChange} variant="outline">
+            <Train size={16} />
+            <span>Back to Simulation</span>
+          </Button>
+        </div>
       </div>
 
       <Map
