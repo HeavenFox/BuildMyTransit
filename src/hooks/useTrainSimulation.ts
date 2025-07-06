@@ -702,12 +702,10 @@ export class Train {
         // Use the calculated deceleration
         accelerationOptions.push(requiredDeceleration);
       }
-      console.log(requiredDeceleration);
     }
 
     // The final acceleration is the minimum (most restrictive) of all options
     this.acceleration = Math.min(...accelerationOptions);
-    console.log("Result: ", this.acceleration);
   }
 
   // Update the train's coordinates based on its position along the way
