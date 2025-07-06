@@ -2,7 +2,6 @@ import { useState, useEffect } from "react";
 import infraJsonUrl from "@/assets/infra.json?url";
 import servicesJsonUrl from "@/assets/services.json?url";
 import { waysToGeoJSON, stationsToGeoJSON } from "@/utils/geoJsonUtils";
-import { TrainRoute } from "./useTrainSimulation";
 
 export interface ServiceSchema {
   services: {

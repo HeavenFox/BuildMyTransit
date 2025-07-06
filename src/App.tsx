@@ -3,14 +3,7 @@ import Map, { Source, Layer } from "react-map-gl/maplibre";
 import { useSubwayData } from "./hooks/useSubwayData";
 import { useTrainSimulation } from "./hooks/useTrainSimulation";
 import type { LayerProps } from "react-map-gl/maplibre";
-import {
-  Play,
-  Pause,
-  Plus,
-  Trash2,
-  ChevronDown,
-  ChevronRight,
-} from "lucide-react";
+import { Play, Pause, Plus, Trash2 } from "lucide-react";
 import * as turf from "@turf/turf";
 import { useState, useMemo } from "react";
 
