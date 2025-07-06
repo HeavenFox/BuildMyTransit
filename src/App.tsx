@@ -241,7 +241,7 @@ function App() {
     <div className="w-full h-screen relative">
       {/* Control Panel */}
       <div className="absolute top-4 left-4 z-10 bg-white rounded-lg shadow-lg p-4 w-80 max-h-[calc(100vh-2rem)] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-3">Train Simulator</h2>
+        <h2 className="text-lg font-semibold mb-3">BuildMyTransit.nyc</h2>
         <div className="space-y-2">
           <div className="flex gap-2">
             <button
