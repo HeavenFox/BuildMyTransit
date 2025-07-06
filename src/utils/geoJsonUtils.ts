@@ -1,22 +1,5 @@
+import type { InfraSchema } from "@/hooks/useSubwayData";
 import * as turf from "@turf/turf";
-
-export interface InfraSchema {
-  node_coords: {
-    [id: string]: [number, number];
-  };
-  ways: {
-    [id: string]: {
-      nodes: string[];
-      bidi?: boolean;
-    };
-  };
-  stations: {
-    [id: string]: {
-      coords: [number, number];
-      name: string;
-    };
-  };
-}
 
 export function waysToGeoJSON(data: InfraSchema): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];

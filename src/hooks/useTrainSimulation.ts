@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as turf from "@turf/turf";
-import type { InfraSchema } from "@/utils/geoJsonUtils";
-import type { ServiceSchema } from "./useSubwayData";
+import type { InfraSchema, ServiceSchema } from "./useSubwayData";
 
 function findCommonElement(a: string[], b: string[]): string | null {
   for (const item of a) {

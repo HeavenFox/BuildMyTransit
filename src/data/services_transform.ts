@@ -31,6 +31,8 @@ interface ServiceSchema {
     bullet: string;
     stop_node_ids: string[];
     route_way_ids: string[];
+    platform_ids: string[];
+    relation_id: number;
   }[];
 }
 
@@ -55,6 +57,7 @@ function transformOSMToServiceSchema(osmData: OSMServicesData): ServiceSchema {
       // Extract stop nodes and route ways from members
       const stopNodeIds: string[] = [];
       const routeWayIds: string[] = [];
+      const platformIds: string[] = [];
 
       for (const member of element.members) {
         if (member.role === "stop" && member.type === "node") {
@@ -62,6 +65,9 @@ function transformOSMToServiceSchema(osmData: OSMServicesData): ServiceSchema {
         } else if (member.role === "" && member.type === "way") {
           // Ways with empty role are typically the route ways
           routeWayIds.push(member.ref.toString());
+        } else if (member.role === "platform" && member.type === "way") {
+          // Ways with platform role are the platform ways
+          platformIds.push(member.ref.toString());
         }
       }
 
@@ -72,6 +78,8 @@ function transformOSMToServiceSchema(osmData: OSMServicesData): ServiceSchema {
         bullet: element.tags.ref, // Use the ref as bullet (e.g., "1", "L", "N")
         stop_node_ids: stopNodeIds,
         route_way_ids: routeWayIds,
+        platform_ids: platformIds,
+        relation_id: element.id,
       };
 
       services.push(service);
@@ -108,6 +116,15 @@ function verifyTransformedServiceData(serviceData: ServiceSchema): void {
     if (service.route_way_ids.length === 0) {
       console.warn(`Warning: Service ${service.bullet} has no route ways`);
     }
+
+    if (service.platform_ids.length === 0) {
+      console.warn(`Warning: Service ${service.bullet} has no platform IDs`);
+    }
+
+    // Check if platform count differs from stop count
+    if (service.platform_ids.length !== service.stop_node_ids.length) {
+      console.log(`Platform/Stop count mismatch - Relation ID: ${service.relation_id}, Service: ${service.bullet}, Stops: ${service.stop_node_ids.length}, Platforms: ${service.platform_ids.length}`);
+    }
   }
 
   console.log("Service data integrity verified successfully!");
@@ -142,7 +159,7 @@ async function main() {
     // Log service details
     serviceData.services.forEach((service) => {
       console.log(
-        `  - ${service.bullet} (${service.name}): ${service.stop_node_ids.length} stops, ${service.route_way_ids.length} route ways`
+        `  - ${service.bullet} (${service.name}): ${service.stop_node_ids.length} stops, ${service.route_way_ids.length} route ways, ${service.platform_ids.length} platforms`
       );
     });
 
@@ -162,4 +179,5 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
 
-export { transformOSMToServiceSchema, ServiceSchema };
+export { transformOSMToServiceSchema };
+export type { ServiceSchema };

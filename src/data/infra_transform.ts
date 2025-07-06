@@ -1,6 +1,8 @@
+import type { InfraSchema } from "@/hooks/useSubwayData";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { centerOfMass, pointToLineDistance } from "@turf/turf";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -25,34 +27,33 @@ interface OSMWay {
   };
 }
 
+interface OSMRelation {
+  type: "relation";
+  id: number;
+  members: Array<{
+    type: "node" | "way" | "relation";
+    ref: number;
+    role?: string;
+  }>;
+  tags?: {
+    [key: string]: string;
+  };
+}
+
 interface OSMData {
-  elements: (OSMNode | OSMWay)[];
+  elements: (OSMNode | OSMWay | OSMRelation)[];
 }
 
-// Define the target InfraSchema structure
-interface InfraSchema {
-  node_coords: {
-    [id: string]: [number, number];
-  };
-  ways: {
-    [id: string]: {
-      nodes: string[];
-      bidi?: boolean;
-    };
-  };
-  stations: {
-    [id: string]: {
-      coords: [number, number];
-      name: string;
-    };
-  };
-}
-
-function transformOSMToInfraSchema(osmData: OSMData): InfraSchema {
+function transformOSMToInfraSchema(
+  osmData: OSMData,
+  servicesData: OSMData
+): InfraSchema {
   const result: InfraSchema = {
     node_coords: {},
     ways: {},
     stations: {},
+    platforms: {},
+    way_to_platforms: {},
   };
 
   // First pass: collect all nodes and identify stations
@@ -103,6 +104,171 @@ function transformOSMToInfraSchema(osmData: OSMData): InfraSchema {
     }
   }
 
+  // Third pass: collect platforms and build station-platform relationships
+  const platforms = new Map<number, OSMWay>();
+  const relationMap = new Map<number, OSMRelation>();
+
+  // First collect all platforms and relations
+  for (const element of osmData.elements) {
+    if (element.type === "way" && element.tags?.railway === "platform") {
+      platforms.set(element.id, element);
+    } else if (
+      element.type === "relation" &&
+      element.tags?.public_transport === "stop_area"
+    ) {
+      relationMap.set(element.id, element);
+    }
+  }
+
+  // Process platforms and associate them with stations
+  for (const [platformId, platform] of platforms) {
+    // Get platform shape coordinates
+    const platformCoords = platform.nodes
+      .filter((nodeId) => nodes.has(nodeId))
+      .map((nodeId) => {
+        const node = nodes.get(nodeId)!;
+        return [node.lon, node.lat] as [number, number];
+      });
+
+    if (platformCoords.length === 0) continue;
+
+    // Calculate centroid using turf
+    const lineString = {
+      type: "LineString" as const,
+      coordinates: platformCoords,
+    };
+    const centroid = centerOfMass(lineString);
+
+    // Find the station this platform belongs to by looking through relations
+    let stationId: string | null = null;
+
+    for (const [, relation] of relationMap) {
+      // Check if this relation contains this platform
+      const hasPlatform = relation.members.some(
+        (member) =>
+          member.type === "way" &&
+          member.ref === platformId &&
+          member.role === "platform"
+      );
+
+      if (hasPlatform) {
+        // Find the station node in this relation
+        const stationMember = relation.members.find(
+          (member) =>
+            member.type === "node" &&
+            (member.role === "stop" || member.role === "")
+        );
+
+        if (stationMember) {
+          stationId = stationMember.ref.toString();
+          break;
+        }
+      }
+    }
+
+    // If we found a station association, add the platform
+    if (stationId && result.stations[stationId]) {
+      result.platforms[platformId.toString()] = {
+        centroid: centroid.geometry.coordinates as [number, number],
+        shape: platformCoords,
+        station_id: stationId,
+      };
+    }
+  }
+
+  // Fourth pass: associate ways with platforms using service data
+  // Process service routes to find way-platform associations
+  for (const element of servicesData.elements) {
+    if (
+      element.type === "relation" &&
+      element.tags?.type === "route" &&
+      element.tags?.route === "subway"
+    ) {
+      // Extract ways and platforms from this route
+      const routeWays: number[] = [];
+      const routePlatforms: number[] = [];
+
+      for (const member of element.members) {
+        if (member.type === "way") {
+          if (member.role === "platform") {
+            routePlatforms.push(member.ref);
+          } else if (
+            member.role === "" ||
+            member.role === "forward" ||
+            member.role === "backward"
+          ) {
+            // These are likely the railway ways
+            routeWays.push(member.ref);
+          }
+        }
+      }
+
+      // For each platform in this route, find the closest way
+      for (const platformId of routePlatforms) {
+        const platformIdStr = platformId.toString();
+        const platform = result.platforms[platformIdStr];
+
+        if (!platform) continue;
+
+        let closestWayId: string | null = null;
+        let minDistance = Infinity;
+
+        // Check each way in this route
+        for (const wayId of routeWays) {
+          const wayIdStr = wayId.toString();
+          const way = result.ways[wayIdStr];
+
+          if (!way) continue;
+
+          // Create a LineString from the way nodes
+          const wayCoords = way.nodes
+            .map((nodeId) => {
+              const coords = result.node_coords[nodeId];
+              return coords ? [coords[0], coords[1]] : null;
+            })
+            .filter((coord) => coord !== null) as [number, number][];
+
+          if (wayCoords.length < 2) continue;
+
+          const lineString = {
+            type: "LineString" as const,
+            coordinates: wayCoords,
+          };
+
+          const platformPoint = {
+            type: "Point" as const,
+            coordinates: platform.centroid,
+          };
+
+          try {
+            const distance = pointToLineDistance(platformPoint, lineString, {
+              units: "meters",
+            });
+
+            if (distance < minDistance) {
+              minDistance = distance;
+              closestWayId = wayIdStr;
+            }
+          } catch (error) {
+            // Skip if there's an error calculating distance
+            continue;
+          }
+        }
+
+        // Associate the platform with the closest way
+        if (closestWayId && minDistance < 1000) {
+          // Within 1km threshold
+          if (!result.way_to_platforms[closestWayId]) {
+            result.way_to_platforms[closestWayId] = [];
+          }
+          if (!result.way_to_platforms[closestWayId].includes(platformIdStr)) {
+            result.way_to_platforms[closestWayId].push(platformIdStr);
+          }
+        }
+      }
+    }
+  }
+
   return result;
 }
 
@@ -114,11 +280,17 @@ export function transformNYCSubwayData(): void {
     const osmDataRaw = fs.readFileSync(osmDataPath, "utf-8");
     const osmData: OSMData = JSON.parse(osmDataRaw);
 
+    // Read the services data
+    const servicesDataPath = path.join(__dirname, "services_osm.json");
+    const servicesDataRaw = fs.readFileSync(servicesDataPath, "utf-8");
+    const servicesData: OSMData = JSON.parse(servicesDataRaw);
+
     console.log("Processing OSM data...");
-    console.log(`Found ${osmData.elements.length} elements`);
+    console.log(`Found ${osmData.elements.length} infrastructure elements`);
+    console.log(`Found ${servicesData.elements.length} service elements`);
 
     // Transform the data
-    const infraData = transformOSMToInfraSchema(osmData);
+    const infraData = transformOSMToInfraSchema(osmData, servicesData);
 
     // Verify the data integrity
     verifyTransformedData(infraData);
@@ -128,6 +300,24 @@ export function transformNYCSubwayData(): void {
     console.log(`- ${Object.keys(infraData.node_coords).length} nodes`);
     console.log(`- ${Object.keys(infraData.ways).length} railway ways`);
     console.log(`- ${Object.keys(infraData.stations).length} stations`);
+    console.log(`- ${Object.keys(infraData.platforms).length} platforms`);
+    console.log(
+      `- ${
+        Object.keys(infraData.way_to_platforms).length
+      } way-platform associations`
+    );
+
+    // Show some statistics about way-platform associations
+    const totalAssociations = Object.values(infraData.way_to_platforms).reduce(
+      (sum, platforms) => sum + platforms.length,
+      0
+    );
+    console.log(`- ${totalAssociations} total platform associations`);
+
+    const waysWithPlatforms = Object.values(infraData.way_to_platforms).filter(
+      (platforms) => platforms.length > 0
+    ).length;
+    console.log(`- ${waysWithPlatforms} ways have associated platforms`);
 
     // Write the transformed data
     const outputPath = path.join(__dirname, "..", "assets", "infra.json");
@@ -190,58 +380,25 @@ export function verifyTransformedData(infraData: InfraSchema): void {
   console.log(`Bidirectional ways: ${bidiWays.length}`);
   console.log(`Unidirectional ways: ${unidiWays.length}`);
 
+  // Verify platform-station relationships
+  let platformStationMismatches = 0;
+  for (const [platformId, platform] of Object.entries(infraData.platforms)) {
+    const stationExists = infraData.stations[platform.station_id];
+    if (!stationExists) {
+      platformStationMismatches++;
+      console.warn(
+        `Platform ${platformId} references non-existent station ${platform.station_id}`
+      );
+    }
+  }
+
+  console.log(`Platform-station mismatches: ${platformStationMismatches}`);
+
   console.log("=== Verification Complete ===\n");
 }
 
 // Export type definitions for use in other modules
-export type { InfraSchema, OSMData, OSMNode, OSMWay };
-
-// Utility function to export specific subway lines or areas
-export function filterByBoundingBox(
-  infraData: InfraSchema,
-  minLon: number,
-  maxLon: number,
-  minLat: number,
-  maxLat: number
-): InfraSchema {
-  const filtered: InfraSchema = {
-    node_coords: {},
-    ways: {},
-    stations: {},
-  };
-
-  // Filter nodes within bounding box
-  for (const [nodeId, coords] of Object.entries(infraData.node_coords)) {
-    const [lon, lat] = coords;
-    if (lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat) {
-      filtered.node_coords[nodeId] = coords;
-    }
-  }
-
-  // Filter ways that have at least one node in the bounding box
-  for (const [wayId, way] of Object.entries(infraData.ways)) {
-    const hasNodeInBounds = way.nodes.some(
-      (nodeId) => filtered.node_coords[nodeId]
-    );
-    if (hasNodeInBounds) {
-      // Only include nodes that are actually in our filtered set
-      filtered.ways[wayId] = {
-        nodes: way.nodes.filter((nodeId) => filtered.node_coords[nodeId]),
-        bidi: way.bidi,
-      };
-    }
-  }
-
-  // Filter stations within bounding box
-  for (const [stationId, station] of Object.entries(infraData.stations)) {
-    const [lon, lat] = station.coords;
-    if (lon >= minLon && lon <= maxLon && lat >= minLat && lat <= maxLat) {
-      filtered.stations[stationId] = station;
-    }
-  }
-
-  return filtered;
-}
+export type { InfraSchema, OSMData, OSMNode, OSMWay, OSMRelation };
 
 // Export the transform function for use in other modules
 export { transformOSMToInfraSchema };

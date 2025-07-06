@@ -9,11 +9,12 @@ export interface ServiceSchema {
     color: string;
     bullet: string;
     stop_node_ids: string[];
+    platform_ids: string[];
     route_way_ids: string[];
   }[];
 }
 
-interface InfraSchema {
+export interface InfraSchema {
   // Node_coords is a mapping of node IDs to their coordinates in [longitude, latitude] format.
   node_coords: {
     [id: string]: [number, number];
@@ -31,6 +32,16 @@ interface InfraSchema {
       coords: [number, number];
       name: string;
     };
+  };
+  platforms: {
+    [id: string]: {
+      centroid: [number, number];
+      shape: [number, number][];
+      station_id: string;
+    };
+  };
+  way_to_platforms: {
+    [wayId: string]: string[]; // Array of platform IDs associated with this way
   };
 }
 

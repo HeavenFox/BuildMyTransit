@@ -1,0 +1,21 @@
+
+[out:json][timeout:250];
+
+// Define the area for New York City.
+// OSM relation for NYC is 175905
+area(3600175905)->.searchArea;
+
+// Gather all subway-related elements within the defined area.
+(
+  
+  relation["route"="subway"](area.searchArea);
+);
+
+// Output the results.
+// 'out body;' prints all tags for the found elements.
+// '>;' recurses down from ways/relations to their member nodes.
+// 'out skel qt;' prints the skeleton of the objects (coordinates)
+// and is generally faster.
+out body;
+//>;
+//out skel qt;
