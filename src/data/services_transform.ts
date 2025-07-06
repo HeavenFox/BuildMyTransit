@@ -147,7 +147,7 @@ async function main() {
     });
 
     // Write the transformed data
-    const outputPath = path.join(__dirname, "services.json");
+    const outputPath = path.join(__dirname, "..", "assets", "services.json");
     fs.writeFileSync(outputPath, JSON.stringify(serviceData, null, 2));
 
     console.log(`Transformation complete! Output written to ${outputPath}`);

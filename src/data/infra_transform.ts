@@ -110,7 +110,7 @@ function transformOSMToInfraSchema(osmData: OSMData): InfraSchema {
 export function transformNYCSubwayData(): void {
   try {
     // Read the OSM data
-    const osmDataPath = path.join(__dirname, "osm.json");
+    const osmDataPath = path.join(__dirname, "infra_osm.json");
     const osmDataRaw = fs.readFileSync(osmDataPath, "utf-8");
     const osmData: OSMData = JSON.parse(osmDataRaw);
 
@@ -130,7 +130,7 @@ export function transformNYCSubwayData(): void {
     console.log(`- ${Object.keys(infraData.stations).length} stations`);
 
     // Write the transformed data
-    const outputPath = path.join(__dirname, "nyc-subway-infra.json");
+    const outputPath = path.join(__dirname, "..", "assets", "infra.json");
     fs.writeFileSync(outputPath, JSON.stringify(infraData, null, 2));
 
     console.log(`Transformation complete! Output written to ${outputPath}`);
@@ -241,12 +241,6 @@ export function filterByBoundingBox(
   }
 
   return filtered;
-}
-
-// Manhattan bounding box for quick filtering
-export function getManhattanSubwayData(infraData: InfraSchema): InfraSchema {
-  // Manhattan bounds (approximately)
-  return filterByBoundingBox(infraData, -74.02, -73.93, 40.7, 40.83);
 }
 
 // Export the transform function for use in other modules
