@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as turf from "@turf/turf";
 import type { InfraSchema, ServiceSchema } from "./useSubwayData";
+import type { UserRoute } from "@/store/routeStore";
 
-function findCommonElement(a: string[], b: string[]): string | null {
+export function findCommonElement(a: string[], b: string[]): string | null {
   for (const item of a) {
     if (b.includes(item)) {
       return item;
@@ -11,7 +12,7 @@ function findCommonElement(a: string[], b: string[]): string | null {
   return null;
 }
 
-class WaySection {
+export class WaySection {
   readonly wayId: string;
   readonly startNodeId: string;
   readonly endNodeId: string;
@@ -151,10 +152,10 @@ export class Infra {
 
 // TrainRoute class to represent a series of connected way sections
 export class TrainRoute {
-  waySections: WaySection[];
+  public waySections: WaySection[];
   stopNodeIds: string[] = []; // List of stop node IDs
-  totalDistance: number;
-  sectionDistances: Map<WaySection, number>; // Cumulative distance to start of each section
+  public totalDistance: number;
+  public sectionDistances: Map<WaySection, number>; // Cumulative distance to start of each section
   infra: Infra;
 
   name: string = "";
@@ -177,6 +178,26 @@ export class TrainRoute {
     this.totalDistance = 0;
     this.sectionDistances = new Map();
     this.infra = infra;
+  }
+
+  static fromUserRoute(infra: Infra, userRoute: UserRoute): TrainRoute {
+    const route = new TrainRoute(infra);
+    route.name = userRoute.name;
+    route.bullet = userRoute.bullet;
+    route.color = userRoute.color;
+    // Stops
+    route.stopNodeIds = [];
+
+    // Build way sections from user route
+    route.waySections = userRoute.waySections.map((section) => {
+      const wayId = section.wayId;
+      const startNodeId = section.startNodeId;
+      const endNodeId = section.endNodeId;
+      return new WaySection(infra, wayId, startNodeId, endNodeId);
+    });
+
+    route.buildRoute();
+    return route;
   }
 
   static fromService(
@@ -912,10 +933,7 @@ export class TrainManager {
 }
 
 // Hook to manage train simulation
-export function useTrainSimulation(
-  infraData: InfraSchema | null,
-  serviceData: ServiceSchema | null
-) {
+export function useTrainSimulation(infraData: InfraSchema | null) {
   const [trainManager, setTrainManager] = useState<TrainManager | null>(null);
   const [trains, setTrains] = useState<Train[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -936,13 +954,6 @@ export function useTrainSimulation(
       setTrainManager(null);
     }
   }, [infraData]);
-
-  const services = useMemo(() => {
-    if (!serviceData || !infra) return [];
-    return serviceData.services.map((service) =>
-      TrainRoute.fromService(infra, service)
-    );
-  }, [serviceData, infra]);
 
   // Animation loop
   const animate = useCallback(() => {
@@ -1052,7 +1063,6 @@ export function useTrainSimulation(
 
   return {
     trains,
-    services,
     isRunning,
     simulationRate,
     setSimulationRate,
