@@ -3,14 +3,59 @@ import Map, { Source, Layer } from "react-map-gl/maplibre";
 import { useSubwayData } from "./hooks/useSubwayData";
 import { useTrainSimulation } from "./hooks/useTrainSimulation";
 import type { LayerProps } from "react-map-gl/maplibre";
-import { Play, Pause, Plus, Trash2 } from "lucide-react";
+import {
+  Play,
+  Pause,
+  Plus,
+  Trash2,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import * as turf from "@turf/turf";
+import { useState, useMemo } from "react";
+
+function Bullet({
+  color,
+  letter,
+  className,
+}: {
+  color: string;
+  letter: string;
+  className?: string;
+}) {
+  // if letter is shaped like <X>, use a diamond shape
+  const isDiamond = letter.startsWith("<") && letter.endsWith(">");
+  if (isDiamond) {
+    return (
+      <div className={className}>
+        <div
+          className={`w-[70.7%] h-[70.7%] flex items-center justify-center text-white text-xs font-bold transform rotate-45`}
+          style={{ backgroundColor: color }}
+        >
+          <span className="transform -rotate-45">{letter.slice(1, -1)}</span>
+        </div>
+      </div>
+    );
+  }
+  // otherwise, use a circle shape
+  return (
+    <div className={className}>
+      <div
+        className={`w-full h-full flex items-center justify-center text-white text-xs font-bold rounded-full`}
+        style={{ backgroundColor: color }}
+      >
+        {letter}
+      </div>
+    </div>
+  );
+}
 
 function App() {
-  const { data, waysGeoJSON, stationsGeoJSON, loading, error } =
+  const { data, services, waysGeoJSON, stationsGeoJSON, loading, error } =
     useSubwayData();
   const {
     trains,
+    services: routes,
     isRunning,
     simulationRate,
     setSimulationRate,
@@ -22,12 +67,44 @@ function App() {
     selectedTrain,
     selectTrain,
     getSelectedTrainRoute,
-  } = useTrainSimulation(data);
+  } = useTrainSimulation(data, services);
+
+  const [expandedBullet, setExpandedBullet] = useState<string | null>(null);
+
+  // Group routes by bullet
+  const routesByBullet = useMemo(() => {
+    if (!routes) return {};
+
+    const grouped: { [bullet: string]: typeof routes } = {};
+    routes.forEach((route) => {
+      if (!grouped[route.bullet]) {
+        grouped[route.bullet] = [];
+      }
+      grouped[route.bullet].push(route);
+    });
+
+    return grouped;
+  }, [routes]);
+
+  // Add train from specific route
+  const addTrainFromRoute = (route: (typeof routes)[0]) => {
+    addTrain(route);
+  };
+
+  const addRandomTrain = () => {
+    if (routes && routes.length > 0) {
+      // Select a random route from the available services
+      const randomIndex = Math.floor(Math.random() * routes.length);
+      const randomRoute = routes[randomIndex];
+      // Add a train using the selected route
+      addTrain(randomRoute);
+    }
+  };
 
   // Function to add 10 trains at once
   const add10Trains = () => {
     for (let i = 0; i < 10; i++) {
-      addTrain();
+      addRandomTrain();
     }
   };
 
@@ -137,7 +214,7 @@ function App() {
             id: train.id,
             velocity: train.velocity,
             acceleration: train.acceleration,
-            wayId: train.wayId,
+            wayId: train.waySection.wayId,
             routePosition: train.routePosition,
             bearing: bearingDegrees,
           },
@@ -170,7 +247,7 @@ function App() {
   return (
     <div className="w-full h-screen relative">
       {/* Control Panel */}
-      <div className="absolute top-4 left-4 z-10 bg-white rounded-lg shadow-lg p-4 min-w-[200px]">
+      <div className="absolute top-4 left-4 z-10 bg-white rounded-lg shadow-lg p-4 w-80 max-h-[calc(100vh-2rem)] overflow-y-auto">
         <h2 className="text-lg font-semibold mb-3">Train Simulator</h2>
         <div className="space-y-2">
           <div className="flex gap-2">
@@ -182,7 +259,7 @@ function App() {
               {isRunning ? "Stop" : "Start"}
             </button>
             <button
-              onClick={addTrain}
+              onClick={addRandomTrain}
               className="flex items-center gap-2 px-3 py-2 bg-green-500 text-white rounded hover:bg-green-600 transition-colors"
             >
               <Plus size={16} />
@@ -249,8 +326,8 @@ function App() {
             <div className="border-t pt-2 mt-2">
               <h3 className="text-sm font-medium mb-2">Selected Train</h3>
               <div className="bg-purple-50 p-2 rounded border-2 border-purple-200">
-                <div className="font-medium text-purple-800">
-                  {selectedTrain.id}
+                <div className="font-medium text-purple-800 text-ellipsis overflow-hidden whitespace-nowrap">
+                  {selectedTrain.route.name}
                 </div>
                 <div className="text-sm text-purple-700">
                   Speed: {(selectedTrain.velocity * 2.23694).toFixed(1)} mph
@@ -262,7 +339,7 @@ function App() {
                   Route Pos: {selectedTrain.routePosition.toFixed(2)} km
                 </div>
                 <div className="text-sm text-purple-700">
-                  Way ID: {selectedTrain.wayId}
+                  Way ID: {selectedTrain.waySection.wayId}
                 </div>
                 <button
                   onClick={() => selectTrain(null)}
@@ -280,34 +357,44 @@ function App() {
               </div>
             </div>
           )}
-          {!selectedTrain && trains.length > 0 && (
-            <div className="border-t pt-2 mt-2">
-              <h3 className="text-sm font-medium mb-2">
-                All Trains ({trains.length})
-              </h3>
-              <div className="max-h-32 overflow-y-auto space-y-1 text-xs">
-                {trains.slice(0, 3).map((train) => (
+
+          {/* Route Selection Section */}
+          <div className="border-t pt-2 mt-2">
+            <h3 className="text-sm font-medium mb-2">Add Train by Route</h3>
+            <div>
+              {Object.entries(routesByBullet).map(([bullet, bulletRoutes]) => (
+                <button onClick={() => setExpandedBullet(bullet)}>
+                  <Bullet
+                    className="w-6 h-6"
+                    color={bulletRoutes[0]?.color || "#000"}
+                    letter={bullet}
+                  />
+                </button>
+              ))}
+            </div>
+            {expandedBullet && (
+              <div className="ml-4 space-y-1 mt-1">
+                {routesByBullet[expandedBullet].map((route, index) => (
                   <div
-                    key={train.id}
-                    className="bg-gray-50 p-2 rounded cursor-pointer hover:bg-gray-100"
-                    onClick={() => selectTrain(train.id)}
+                    key={index}
+                    className="flex items-center gap-2 p-1 bg-gray-50 rounded"
                   >
-                    <div className="font-medium">{train.id}</div>
-                    <div>
-                      Speed: {(train.velocity * 2.23694).toFixed(1)} mph
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium text-gray-800 truncate">
+                        {route.name.replace(/^NYCS - /, "")}
+                      </div>
                     </div>
-                    <div>Accel: {train.acceleration.toFixed(2)} m/s²</div>
-                    <div>Route Pos: {train.routePosition.toFixed(2)} km</div>
+                    <button
+                      onClick={() => addTrainFromRoute(route)}
+                      className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 flex-shrink-0"
+                    >
+                      Add
+                    </button>
                   </div>
                 ))}
-                {trains.length > 3 && (
-                  <div className="text-gray-500 text-center">
-                    ... and {trains.length - 3} more trains
-                  </div>
-                )}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 

@@ -1,6 +1,16 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as turf from "@turf/turf";
 import type { InfraSchema } from "@/utils/geoJsonUtils";
+import type { ServiceSchema } from "./useSubwayData";
+
+function findCommonElement(a: string[], b: string[]): string | null {
+  for (const item of a) {
+    if (b.includes(item)) {
+      return item;
+    }
+  }
+  return null;
+}
 
 class WaySection {
   readonly wayId: string;
@@ -89,51 +99,9 @@ class WaySection {
 // Infrastructure class to handle route calculations and way connections
 export class Infra {
   private data: InfraSchema;
-  private wayConnectionsCache: Map<string, string[]> = new Map();
 
   constructor(infraData: InfraSchema) {
     this.data = infraData;
-    this.buildConnectionsCache();
-  }
-
-  // Build a cache of way connections for efficient lookups
-  private buildConnectionsCache(): void {
-    this.wayConnectionsCache.clear();
-
-    // For each way, find all ways that share nodes with it
-    Object.entries(this.data.ways).forEach(([wayId, way]) => {
-      const connections = new Set<string>();
-
-      // Check first and last nodes for connections
-      const firstNode = way.nodes[0];
-      const lastNode = way.nodes[way.nodes.length - 1];
-
-      Object.entries(this.data.ways).forEach(([otherWayId, otherWay]) => {
-        if (wayId === otherWayId) return;
-
-        // Check if other way shares the first or last node
-        if (
-          otherWay.nodes.includes(firstNode) ||
-          otherWay.nodes.includes(lastNode)
-        ) {
-          connections.add(otherWayId);
-        }
-      });
-
-      this.wayConnectionsCache.set(wayId, Array.from(connections));
-    });
-  }
-
-  // Get ways connected to a specific way
-  getConnectedWays(wayId: string): string[] {
-    return this.wayConnectionsCache.get(wayId) || [];
-  }
-
-  // Get ways connected to a specific node
-  getWaysConnectedToNode(nodeId: string): string[] {
-    return Object.entries(this.data.ways)
-      .filter(([_, way]) => way.nodes[0] === nodeId)
-      .map(([wayId]) => wayId);
   }
 
   // Get way data
@@ -189,49 +157,90 @@ export class TrainRoute {
   sectionDistances: Map<WaySection, number>; // Cumulative distance to start of each section
   infra: Infra;
 
-  constructor(startWayId: string, infra: Infra, maxRouteLength: number = 50) {
+  name: string = "";
+  bullet: string = "";
+  color: string = "#000000"; // Default color
+
+  private constructor(infra: Infra) {
     this.waySections = [];
     this.totalDistance = 0;
     this.sectionDistances = new Map();
     this.infra = infra;
+  }
 
-    this.buildRoute(startWayId, maxRouteLength);
+  static fromService(
+    infra: Infra,
+    service: ServiceSchema["services"][number]
+  ): TrainRoute {
+    const route = new TrainRoute(infra);
+    route.name = service.name;
+    route.bullet = service.bullet;
+    route.color = service.color;
+
+    // console.group(`Building route for service ${service.name}`);
+    // console.log(service.route_way_ids);
+
+    if (service.route_way_ids.length <= 1) {
+      route.waySections = service.route_way_ids.map(
+        (wayId) => new WaySection(infra, wayId)
+      );
+    } else {
+      const nodes = service.route_way_ids
+        .map((wayId) => infra.getWay(wayId)?.nodes)
+        .filter((n) => n);
+      const startEnds: [string, string][] = nodes.map((nodeIds) => [
+        nodeIds[0],
+        nodeIds[nodeIds.length - 1],
+      ]);
+
+      for (let i = 0; i < startEnds.length - 1; i++) {
+        // Find common way that connects these two nodes
+        const commonNodeId = findCommonElement(nodes[i], nodes[i + 1]);
+
+        if (commonNodeId) {
+          startEnds[i][1] = commonNodeId;
+          startEnds[i + 1][0] = commonNodeId;
+        } else {
+          console.warn(
+            `No connecting way found between nodes ${
+              service.route_way_ids[i]
+            } and ${service.route_way_ids[i + 1]}`
+          );
+        }
+      }
+
+      if (startEnds[0][0] === startEnds[0][1]) {
+        startEnds[0][0] = nodes[0][nodes[0].length - 1];
+      }
+      if (
+        startEnds[startEnds.length - 1][0] ===
+        startEnds[startEnds.length - 1][1]
+      ) {
+        startEnds[startEnds.length - 1][1] = nodes[nodes.length - 1][0];
+      }
+
+      route.waySections = startEnds.map(([startNodeId, endNodeId], index) => {
+        const wayId = service.route_way_ids[index];
+        return new WaySection(infra, wayId, startNodeId, endNodeId);
+      });
+    }
+
+    // console.groupEnd();
+
+    route.buildRoute();
+    return route;
   }
 
   // Build a route by following connected ways
-  private buildRoute(startWayId: string, maxRouteLength: number): void {
-    const visited = new Set<string>();
-    let currentWayId = startWayId;
+  private buildRoute(): void {
     let cumulativeDistance = 0;
 
-    for (let i = 0; i < maxRouteLength; i++) {
-      if (visited.has(currentWayId)) break;
-
-      const way = this.infra.getWay(currentWayId);
-      if (!way || way.nodes.length < 2) break;
-
-      // Create a WaySection for the entire way
-      const waySection = new WaySection(this.infra, currentWayId);
-
-      // Add current way section to route
-      this.waySections.push(waySection);
+    for (const waySection of this.waySections) {
       this.sectionDistances.set(waySection, cumulativeDistance);
-      visited.add(currentWayId);
 
       // Calculate distance of current way section
       const sectionDistance = waySection.getDistance();
       cumulativeDistance += sectionDistance;
-
-      // Find next connected way using infra
-      const endNodeId = way.nodes[way.nodes.length - 1];
-      const connectedWays = this.infra
-        .getWaysConnectedToNode(endNodeId)
-        .filter((wayId) => wayId !== currentWayId && !visited.has(wayId));
-
-      if (connectedWays.length === 0) break;
-
-      // Pick the first connected way (could be randomized)
-      currentWayId = connectedWays[0];
     }
 
     this.totalDistance = cumulativeDistance;
@@ -295,11 +304,11 @@ export class TrainRoute {
 // Train class to represent individual trains
 export class Train {
   id: string;
+
   // Position components
-  wayId: string;
-  fromNodeId: string;
-  toNodeId: string;
+  waySection: WaySection;
   distanceAlongKm: number;
+
   // Velocity is m/s
   velocity: number;
   // Acceleration is m/s^2
@@ -321,28 +330,26 @@ export class Train {
   slowDownDistance: number = 0.6; // Start slowing down if train ahead is within 600m
   emergencyDistance: number = 0.3; // Emergency braking if train ahead is within 300m
 
-  constructor(
-    id: string,
-    wayId: string,
-    fromNodeId: string,
-    toNodeId: string,
-    distanceAlong: number = 0,
-    infra: Infra
-  ) {
+  infra: Infra;
+
+  constructor(id: string, infra: Infra, route: TrainRoute) {
     this.id = id;
-    this.wayId = wayId;
-    this.fromNodeId = fromNodeId;
-    this.toNodeId = toNodeId;
-    this.distanceAlongKm = distanceAlong;
+    this.waySection = route.waySections[0];
+    this.distanceAlongKm = 0;
     this.velocity = 0;
     this.acceleration = 0;
     this.coordinates = [0, 0];
     this.bearing = 0;
-    this.route = new TrainRoute(wayId, infra);
-    this.routePosition = this.route.getRoutePosition(wayId, distanceAlong);
+    this.route = route;
+    this.routePosition = this.route.getRoutePosition(
+      this.waySection.wayId,
+      this.distanceAlongKm
+    );
+
+    this.infra = infra;
 
     // Initialize coordinates and bearing
-    this.updateCoordinates(infra);
+    this.updateCoordinates();
   }
 
   // Update train position based on velocity and time
@@ -369,7 +376,7 @@ export class Train {
     this.routePosition += distanceToMove;
 
     // Update coordinates
-    this.updateCoordinates(infra);
+    this.updateCoordinates();
 
     // Check if train has reached the end of the way
     return this.hasReachedEnd(infra);
@@ -379,7 +386,7 @@ export class Train {
   private getDistanceToTrainAhead(otherTrains: Train[], infra: Infra): number {
     // Find current way section index
     const currentWayIndex = this.route.waySections.findIndex(
-      (section) => section.wayId === this.wayId
+      (section) => section.wayId === this.waySection.wayId
     );
     if (currentWayIndex === -1) return Number.MAX_SAFE_INTEGER;
 
@@ -399,7 +406,7 @@ export class Train {
 
       // Find trains on this segment
       const trainsOnSegment = otherTrains.filter(
-        (train) => train.id !== this.id && train.wayId === wayId
+        (train) => train.id !== this.id && train.waySection.wayId === wayId
       );
 
       if (trainsOnSegment.length > 0) {
@@ -489,15 +496,9 @@ export class Train {
   }
 
   // Update the train's coordinates based on its position along the way
-  updateCoordinates(infra: Infra): void {
-    const way = infra.getWay(this.wayId);
-
-    if (!way || way.nodes.length < 2) {
-      return;
-    }
-
+  updateCoordinates(): void {
     // Get all coordinates for this way using infra
-    const coordinates = infra.getWayCoordinates(this.wayId);
+    const coordinates = this.waySection.getCoordinates();
 
     if (coordinates.length < 2) {
       return;
@@ -545,13 +546,13 @@ export class Train {
 
   // Check if train has reached the end of the current way
   hasReachedEnd(infra: Infra): boolean {
-    const way = infra.getWay(this.wayId);
+    const way = infra.getWay(this.waySection.wayId);
 
     if (!way || way.nodes.length < 2) {
       return true;
     }
 
-    const lineLength = infra.getWayDistance(this.wayId);
+    const lineLength = infra.getWayDistance(this.waySection.wayId);
     if (lineLength === 0) {
       return true;
     }
@@ -564,7 +565,7 @@ export class Train {
   moveToNextWay(infra: Infra): boolean {
     // Find the current way section index in the route
     const currentWayIndex = this.route.waySections.findIndex(
-      (section) => section.wayId === this.wayId
+      (section) => section.wayId === this.waySection.wayId
     );
 
     if (currentWayIndex === -1) {
@@ -589,15 +590,13 @@ export class Train {
       return false;
     }
 
-    // Update train position to the next way
-    this.wayId = nextWayId;
-    this.fromNodeId = nextWaySection.startNodeId;
-    this.toNodeId = nextWaySection.endNodeId;
+    // Update train position to the next way section
+    this.waySection = nextWaySection;
     this.distanceAlongKm = 0; // Start at beginning of new way
 
     // Update route position
     this.routePosition = this.route.getRoutePosition(
-      nextWayId,
+      nextWaySection.wayId,
       this.distanceAlongKm
     );
 
@@ -618,7 +617,7 @@ export class TrainManager {
   }
 
   // Add a new train at a random location
-  addRandomTrain(): string | null {
+  addTrain(route: TrainRoute): string | null {
     const wayIds = this.infra.getAllWayIds();
     if (wayIds.length === 0) return null;
 
@@ -629,17 +628,10 @@ export class TrainManager {
     if (!way || way.nodes.length < 2) return null;
 
     const trainId = `train-${this.nextTrainId++}`;
-    const train = new Train(
-      trainId,
-      randomWayId,
-      way.nodes[0],
-      way.nodes[way.nodes.length - 1],
-      0,
-      this.infra
-    );
+    const train = new Train(trainId, this.infra, route);
 
     // Set initial velocity and acceleration
-    train.velocity = 10; // Start with 10 m/s
+    train.velocity = 0; // Start with 0 m/s
     train.acceleration = 1; // 1 m/s^2
 
     this.trains.set(trainId, train);
@@ -687,7 +679,10 @@ export class TrainManager {
 }
 
 // Hook to manage train simulation
-export function useTrainSimulation(infraData: InfraSchema | null) {
+export function useTrainSimulation(
+  infraData: InfraSchema | null,
+  serviceData: ServiceSchema | null
+) {
   const [trainManager, setTrainManager] = useState<TrainManager | null>(null);
   const [trains, setTrains] = useState<Train[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -707,6 +702,13 @@ export function useTrainSimulation(infraData: InfraSchema | null) {
       setTrainManager(null);
     }
   }, [infraData]);
+
+  const services = useMemo(() => {
+    if (!serviceData || !infra) return [];
+    return serviceData.services.map((service) =>
+      TrainRoute.fromService(infra, service)
+    );
+  }, [serviceData, infra]);
 
   // Animation loop
   const animate = useCallback(() => {
@@ -747,9 +749,9 @@ export function useTrainSimulation(infraData: InfraSchema | null) {
   // Functions to control simulation
   const startSimulation = () => setIsRunning(true);
   const stopSimulation = () => setIsRunning(false);
-  const addTrain = () => {
+  const addTrain = (route: TrainRoute) => {
     if (trainManager) {
-      trainManager.addRandomTrain();
+      trainManager.addTrain(route);
       setTrains(trainManager.getAllTrains());
     }
   };
@@ -780,8 +782,6 @@ export function useTrainSimulation(infraData: InfraSchema | null) {
     if (!selectedTrain || !infra) return null;
 
     const routeCoordinates: [number, number][] = [];
-
-    console.log("Way: ", selectedTrain.route.waySections);
 
     for (const waySection of selectedTrain.route.waySections) {
       const coordinates = waySection.getCoordinates();
@@ -818,6 +818,7 @@ export function useTrainSimulation(infraData: InfraSchema | null) {
 
   return {
     trains,
+    services,
     isRunning,
     simulationRate,
     setSimulationRate,

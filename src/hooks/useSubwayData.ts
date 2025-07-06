@@ -1,6 +1,18 @@
 import { useState, useEffect } from "react";
 import infraJsonUrl from "@/assets/infra.json?url";
+import servicesJsonUrl from "@/assets/services.json?url";
 import { waysToGeoJSON, stationsToGeoJSON } from "@/utils/geoJsonUtils";
+import { TrainRoute } from "./useTrainSimulation";
+
+export interface ServiceSchema {
+  services: {
+    name: string;
+    color: string;
+    bullet: string;
+    stop_node_ids: string[];
+    route_way_ids: string[];
+  }[];
+}
 
 interface InfraSchema {
   // Node_coords is a mapping of node IDs to their coordinates in [longitude, latitude] format.
@@ -25,6 +37,7 @@ interface InfraSchema {
 
 export function useSubwayData() {
   const [data, setData] = useState<InfraSchema | null>(null);
+  const [services, setServices] = useState<ServiceSchema | null>(null);
   const [waysGeoJSON, setWaysGeoJSON] =
     useState<GeoJSON.FeatureCollection | null>(null);
   const [stationsGeoJSON, setStationsGeoJSON] =
@@ -35,14 +48,24 @@ export function useSubwayData() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        // In a real app, you might want to fetch this from a server
-        // For now, we'll assume the data is available in the public directory
-        const response = await fetch(infraJsonUrl);
-        if (!response.ok) {
-          throw new Error("Failed to load subway data");
+        // Load both infrastructure and services data
+        const [infraResponse, servicesResponse] = await Promise.all([
+          fetch(infraJsonUrl),
+          fetch(servicesJsonUrl),
+        ]);
+
+        if (!infraResponse.ok) {
+          throw new Error("Failed to load infrastructure data");
         }
-        const infraData: InfraSchema = await response.json();
+        if (!servicesResponse.ok) {
+          throw new Error("Failed to load services data");
+        }
+
+        const infraData: InfraSchema = await infraResponse.json();
+        const servicesData: ServiceSchema = await servicesResponse.json();
+
         setData(infraData);
+        setServices(servicesData);
 
         // Convert ways and stations to GeoJSON
         const waysGeoJSON = waysToGeoJSON(infraData);
@@ -60,7 +83,14 @@ export function useSubwayData() {
     loadData();
   }, []);
 
-  return { data, waysGeoJSON, stationsGeoJSON, loading, error };
+  return {
+    data,
+    services,
+    waysGeoJSON,
+    stationsGeoJSON,
+    loading,
+    error,
+  };
 }
 
 // Helper function to get all station coordinates for map rendering

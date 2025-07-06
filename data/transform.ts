@@ -81,11 +81,6 @@ function transformOSMToInfraSchema(osmData: OSMData): InfraSchema {
   // Second pass: collect railway ways
   for (const element of osmData.elements) {
     if (element.type === "way" && element.tags?.railway === "subway") {
-      // Skip service tracks, yards, and other non-passenger infrastructure
-      if (element.tags.service) {
-        continue;
-      }
-
       // Convert node IDs to strings and filter out any that don't exist
       const nodeIds = element.nodes
         .filter((nodeId) => nodes.has(nodeId))
