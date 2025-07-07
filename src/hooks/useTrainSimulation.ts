@@ -110,7 +110,6 @@ export class WaySection {
     const platforms = this.infra.getData().way_to_platforms[this.wayId];
     const way = this.infra.getWay(this.wayId);
     if (!platforms || platforms.length === 0) {
-      console.log(`No platforms found for way ${this.wayId}`);
       return [];
     }
 
@@ -118,7 +117,6 @@ export class WaySection {
       (this.startIndex === 0 && this.endIndex === way.nodes.length - 1) ||
       (this.startIndex === way.nodes.length - 1 && this.endIndex === 0)
     ) {
-      console.log(`${this.wayId} covers all platforms`, platforms);
       return platforms;
     }
 
@@ -143,8 +141,6 @@ export class WaySection {
         result.push(platformId);
       }
     }
-
-    console.log(`Platforms for way ${this.wayId}:`, result);
 
     return result;
   }
@@ -370,8 +366,6 @@ export class TrainRoute {
         }
       }
     }
-
-    console.log(coordinates);
 
     return this.stopPositionFromCoordinates(coordinates);
   }
@@ -757,10 +751,13 @@ export class Train {
     const maxSpeed = 60 / 2.23694; // 60 mph in m/s
 
     // Calculate braking distances based on current velocity
-    const brakingDistance =
-      (this.velocity * this.velocity) / (2 * this.baseDeceleration * 1000); // Convert to km
-    const emergencyBrakingDistance =
-      (this.velocity * this.velocity) / (2 * this.emergencyDeceleration * 1000); // Convert to km
+    // const brakingDistance =
+    //   (this.velocity * this.velocity) / (2 * this.baseDeceleration * 1000); // Convert to km
+    // const emergencyBrakingDistance =
+    //   (this.velocity * this.velocity) / (2 * this.emergencyDeceleration * 1000); // Convert to km
+
+    const brakingDistance = this.slowDownDistance; // 600m
+    const emergencyBrakingDistance = this.emergencyDistance; // 300m
 
     // Array to collect all acceleration constraints
     const accelerationOptions: number[] = [];
@@ -1092,6 +1089,23 @@ export function useTrainSimulation(infraData: InfraSchema | null) {
     }
   };
 
+  // Custom setDwellTime function that updates all existing trains
+  const updateDwellTime = useCallback(
+    (newDwellTime: number) => {
+      setDwellTime(newDwellTime);
+
+      // Update dwell time for all existing trains
+      if (trainManager) {
+        trainManager.getAllTrains().forEach((train) => {
+          train.stopDwellTime = newDwellTime;
+        });
+        // Update the trains state to reflect the changes
+        setTrains(trainManager.getAllTrains());
+      }
+    },
+    [trainManager]
+  );
+
   // Selected train state
   const [selectedTrainId, setSelectedTrainId] = useState<string | null>(null);
 
@@ -1152,7 +1166,7 @@ export function useTrainSimulation(infraData: InfraSchema | null) {
     simulationRate,
     setSimulationRate,
     dwellTime,
-    setDwellTime,
+    setDwellTime: updateDwellTime,
     startSimulation,
     stopSimulation,
     addTrain,
