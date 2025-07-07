@@ -469,6 +469,11 @@ export function TrainSimulator({
             Design Routes
           </Button>
         </div>
+
+        <div className="pt-2 mt-2 border-t text-xs">
+          <a href="about.html">About</a> |{" "}
+          <a href="https://github.com/HeavenFox/BuildMyTransit">GitHub</a>
+        </div>
       </div>
 
       <Map
