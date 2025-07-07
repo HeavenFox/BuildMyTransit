@@ -37,7 +37,7 @@ export interface InfraSchema {
     [id: string]: {
       centroid: [number, number];
       shape: [number, number][];
-      station_id: string;
+      station_id: string | null;
     };
   };
   way_to_platforms: {

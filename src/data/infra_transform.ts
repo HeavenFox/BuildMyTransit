@@ -167,13 +167,11 @@ function transformOSMToInfraSchema(
     }
 
     // If we found a station association, add the platform
-    if (stationId && result.stations[stationId]) {
-      result.platforms[platformId.toString()] = {
-        centroid: centroid.geometry.coordinates as [number, number],
-        shape: platformCoords,
-        station_id: stationId,
-      };
-    }
+    result.platforms[platformId.toString()] = {
+      centroid: centroid.geometry.coordinates as [number, number],
+      shape: platformCoords,
+      station_id: stationId,
+    };
   }
 
   // Fourth pass: associate ways with platforms using service data
@@ -208,6 +206,13 @@ function transformOSMToInfraSchema(
         const platformIdStr = platformId.toString();
         const platform = result.platforms[platformIdStr];
 
+        if (!platform) {
+          console.warn(
+            `Platform ${platformIdStr} not found in platforms, skipping association`
+          );
+          continue;
+        }
+
         if (!platform) continue;
 
         let closestWayId: string | null = null;
@@ -240,18 +245,13 @@ function transformOSMToInfraSchema(
             coordinates: platform.centroid,
           };
 
-          try {
-            const distance = pointToLineDistance(platformPoint, lineString, {
-              units: "meters",
-            });
+          const distance = pointToLineDistance(platformPoint, lineString, {
+            units: "meters",
+          });
 
-            if (distance < minDistance) {
-              minDistance = distance;
-              closestWayId = wayIdStr;
-            }
-          } catch (error) {
-            // Skip if there's an error calculating distance
-            continue;
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestWayId = wayIdStr;
           }
         }
 
@@ -383,6 +383,11 @@ export function verifyTransformedData(infraData: InfraSchema): void {
   // Verify platform-station relationships
   let platformStationMismatches = 0;
   for (const [platformId, platform] of Object.entries(infraData.platforms)) {
+    if (!platform.station_id) {
+      console.warn(`Platform ${platformId} has no associated station`);
+      platformStationMismatches++;
+      continue;
+    }
     const stationExists = infraData.stations[platform.station_id];
     if (!stationExists) {
       platformStationMismatches++;

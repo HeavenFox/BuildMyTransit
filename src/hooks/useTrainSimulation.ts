@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as turf from "@turf/turf";
 import type { InfraSchema, ServiceSchema } from "./useSubwayData";
 import type { UserRoute } from "@/store/routeStore";
+import { wayToGeoJSON } from "@/utils/geoJsonUtils";
 
 export function findCommonElement(a: string[], b: string[]): string | null {
   for (const item of a) {
@@ -20,12 +21,19 @@ export class WaySection {
   private nodeIds: string[];
   private points: [number, number][];
 
+  private startIndex: number;
+  private endIndex: number;
+
+  infra: Infra;
+
   constructor(
     infra: Infra,
     wayId: string,
     startNodeId?: string,
     endNodeId?: string
   ) {
+    this.infra = infra;
+
     this.wayId = wayId;
     const way = infra.getWay(wayId);
 
@@ -58,6 +66,9 @@ export class WaySection {
         `Start node ${this.startNodeId} should not be after end node ${this.endNodeId} in unidirectional way ${wayId}`
       );
     }
+
+    this.startIndex = startIndex;
+    this.endIndex = endIndex;
 
     // Collect all nodes in the section
     if (startIndex < endIndex) {
@@ -93,6 +104,49 @@ export class WaySection {
   // Get the nodes in this section
   getNodes(): string[] {
     return this.nodeIds;
+  }
+
+  getPlatformIds() {
+    const platforms = this.infra.getData().way_to_platforms[this.wayId];
+    const way = this.infra.getWay(this.wayId);
+    if (!platforms || platforms.length === 0) {
+      console.log(`No platforms found for way ${this.wayId}`);
+      return [];
+    }
+
+    if (
+      (this.startIndex === 0 && this.endIndex === way.nodes.length - 1) ||
+      (this.startIndex === way.nodes.length - 1 && this.endIndex === 0)
+    ) {
+      console.log(`${this.wayId} covers all platforms`, platforms);
+      return platforms;
+    }
+
+    const lineString = wayToGeoJSON(this.infra.getData(), way.nodes);
+
+    const result: string[] = [];
+
+    for (const platformId of platforms) {
+      const platform = this.infra.getData().platforms[platformId];
+      if (!platform) continue;
+
+      const nearestPoint = turf.nearestPointOnLine(
+        lineString,
+        platform.centroid
+      );
+
+      const index = nearestPoint.properties.index;
+      if (
+        (index >= this.startIndex && index < this.endIndex) ||
+        (index >= this.endIndex && index < this.startIndex)
+      ) {
+        result.push(platformId);
+      }
+    }
+
+    console.log(`Platforms for way ${this.wayId}:`, result);
+
+    return result;
   }
 }
 
@@ -153,7 +207,8 @@ export class Infra {
 // TrainRoute class to represent a series of connected way sections
 export class TrainRoute {
   public waySections: WaySection[];
-  stopNodeIds: string[] = []; // List of stop node IDs
+  stopNodeIds: string[] | null = null; // List of stop node IDs
+  platformIds: string[] | null = null; // List of platform node IDs (for stops)
   public totalDistance: number;
   public sectionDistances: Map<WaySection, number>; // Cumulative distance to start of each section
   infra: Infra;
@@ -185,8 +240,6 @@ export class TrainRoute {
     route.name = userRoute.name;
     route.bullet = userRoute.bullet;
     route.color = userRoute.color;
-    // Stops
-    route.stopNodeIds = [];
 
     // Build way sections from user route
     route.waySections = userRoute.waySections.map((section) => {
@@ -197,6 +250,17 @@ export class TrainRoute {
     });
 
     route.buildRoute();
+
+    // Stops
+    const platforms = [];
+    for (const waySection of route.waySections) {
+      const platformIds = waySection.getPlatformIds();
+      if (platformIds) {
+        platforms.push(...platformIds);
+      }
+    }
+    route.platformIds = platforms;
+
     return route;
   }
 
@@ -280,18 +344,41 @@ export class TrainRoute {
   }
 
   // Cache stop positions along the route for efficient distance calculations
-  private cacheStopPositions(): void {
-    if (!this.stopNodeIds || this.stopNodeIds.length === 0) {
-      this.cachedStopPositions = [];
-      return;
+  private getStopPositions() {
+    const coordinates: { id: string; coordinate: [number, number] }[] = [];
+
+    if (this.stopNodeIds && this.stopNodeIds.length > 0) {
+      for (const stopNodeId of this.stopNodeIds) {
+        const stopCoords = this.infra.getNodeCoords(stopNodeId);
+        if (stopCoords) {
+          coordinates.push({
+            id: `node-${stopNodeId}`,
+            coordinate: stopCoords,
+          });
+        }
+      }
     }
 
-    const routeLine = this.getRouteLine();
-    if (!routeLine) {
-      this.cachedStopPositions = [];
-      return;
+    if (this.platformIds && this.platformIds.length > 0) {
+      for (const platformId of this.platformIds) {
+        const platform = this.infra.getData().platforms[platformId];
+        if (platform && platform.centroid) {
+          coordinates.push({
+            id: `way-${platformId}`,
+            coordinate: platform.centroid,
+          });
+        }
+      }
     }
 
+    console.log(coordinates);
+
+    return this.stopPositionFromCoordinates(coordinates);
+  }
+
+  private stopPositionFromCoordinates(
+    coordinates: { id: string; coordinate: [number, number] }[]
+  ) {
     const stops: Array<{
       nodeId: string;
       routePosition: number;
@@ -299,12 +386,15 @@ export class TrainRoute {
       pointOnRoute: GeoJSON.Feature<GeoJSON.Point>;
     }> = [];
 
-    // Find the position of each stop along the route
-    for (const stopNodeId of this.stopNodeIds) {
-      const stopCoords = this.infra.getNodeCoords(stopNodeId);
-      if (!stopCoords) continue;
+    const routeLine = this.getRouteLine();
 
-      const stopPoint = turf.point(stopCoords);
+    if (!routeLine) {
+      return [];
+    }
+
+    // Find the position of each stop along the route
+    for (const stopCoords of coordinates) {
+      const stopPoint = turf.point(stopCoords.coordinate);
 
       // Find the nearest point on the route line to this stop
       const nearestPoint = turf.nearestPointOnLine(routeLine, stopPoint);
@@ -316,9 +406,9 @@ export class TrainRoute {
       ); // Platforms are ~150m long, so adjust to center
 
       stops.push({
-        nodeId: stopNodeId,
+        nodeId: stopCoords.id,
         routePosition,
-        coordinates: stopCoords,
+        coordinates: stopCoords.coordinate,
         pointOnRoute: nearestPoint,
       });
     }
@@ -326,13 +416,7 @@ export class TrainRoute {
     // Sort stops by their position along the route
     stops.sort((a, b) => a.routePosition - b.routePosition);
 
-    this.cachedStopPositions = stops;
-  }
-
-  // Force recalculation of cached stop positions if needed
-  public invalidateStopCache(): void {
-    this.cachedStopPositions = null;
-    this.cacheStopPositions();
+    return stops;
   }
 
   // Get position along the entire route given way and distance along that way
@@ -391,7 +475,8 @@ export class TrainRoute {
 
   getCachedStopPositions() {
     if (!this.cachedStopPositions) {
-      this.cacheStopPositions();
+      const result = this.getStopPositions();
+      this.cachedStopPositions = result;
     }
 
     if (!this.cachedStopPositions || this.cachedStopPositions.length === 0) {

@@ -1,6 +1,14 @@
 import type { InfraSchema } from "@/hooks/useSubwayData";
 import * as turf from "@turf/turf";
 
+export function wayToGeoJSON(data: InfraSchema, nodes: string[]) {
+  const coordinates = nodes
+    .map((nodeId) => data.node_coords[nodeId])
+    .filter((coord) => coord != null);
+
+  return turf.lineString(coordinates);
+}
+
 export function waysToGeoJSON(data: InfraSchema): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
 
