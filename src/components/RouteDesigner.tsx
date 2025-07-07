@@ -304,6 +304,9 @@ export function RouteDesigner({
         newWay.nodes
       );
       if (!connectingNodeId) return;
+      if (connectingNodeId === lastSection.startNodeId) {
+        return;
+      }
 
       if (connectingNodeId !== lastSection.endNodeId) {
         lastSection = new WaySection(
@@ -328,6 +331,10 @@ export function RouteDesigner({
           connectingNodeId,
           newWay.nodes[newWay.nodes.length - 1]
         );
+      }
+
+      if (newSection.getCoordinates().length < 2) {
+        return;
       }
 
       setWaySections([...previous, lastSection, newSection]);
