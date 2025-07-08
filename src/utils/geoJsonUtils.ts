@@ -9,7 +9,10 @@ export function wayToGeoJSON(data: InfraSchema, nodes: string[]) {
   return turf.lineString(coordinates);
 }
 
-export function waysToGeoJSON(data: InfraSchema): GeoJSON.FeatureCollection {
+export function waysToGeoJSON(
+  data: InfraSchema,
+  color?: Map<string, string>
+): GeoJSON.FeatureCollection {
   const features: GeoJSON.Feature[] = [];
 
   Object.entries(data.ways).forEach(([wayId, way]) => {
@@ -24,6 +27,7 @@ export function waysToGeoJSON(data: InfraSchema): GeoJSON.FeatureCollection {
         wayId: wayId,
         bidi: way.bidi || false,
         nodeCount: coordinates.length,
+        color: color?.get(wayId),
       });
 
       features.push(lineString);

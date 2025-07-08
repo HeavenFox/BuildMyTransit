@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import * as turf from "@turf/turf";
 import type { InfraSchema, ServiceSchema } from "./useSubwayData";
 import type { UserRoute } from "@/store/routeStore";
-import { wayToGeoJSON } from "@/utils/geoJsonUtils";
+import { waysToGeoJSON, wayToGeoJSON } from "@/utils/geoJsonUtils";
 
 export function findCommonElement(a: string[], b: string[]): string | null {
   for (const item of a) {
@@ -1015,27 +1015,27 @@ export class TrainManager {
 }
 
 // Hook to manage train simulation
-export function useTrainSimulation(infraData: InfraSchema | null) {
-  const [trainManager, setTrainManager] = useState<TrainManager | null>(null);
+export function useTrainSimulation(infra: Infra, services?: TrainRoute[]) {
+  const [trainManager] = useState<TrainManager>(() => new TrainManager(infra));
   const [trains, setTrains] = useState<Train[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [simulationRate, setSimulationRate] = useState(1);
   const [dwellTime, setDwellTime] = useState(10); // Default dwell time in seconds
-  const [infra, setInfra] = useState<Infra | null>(null);
   const lastUpdateTime = useRef<number>(Date.now());
   const animationFrameId = useRef<number | undefined>(undefined);
 
-  // Create infra and train manager when infraData is available
-  useEffect(() => {
-    if (infraData) {
-      const infraInstance = new Infra(infraData);
-      setInfra(infraInstance);
-      setTrainManager(new TrainManager(infraInstance));
-    } else {
-      setInfra(null);
-      setTrainManager(null);
+  const trackGeoJSON = useMemo(() => {
+    const colors = new Map<string, string>();
+    if (services && services.length > 0) {
+      for (const service of services) {
+        for (const waySection of service.waySections) {
+          colors.set(waySection.wayId, service.color);
+        }
+      }
     }
-  }, [infraData]);
+
+    return waysToGeoJSON(infra.getData(), colors);
+  }, [infra]);
 
   // Animation loop
   const animate = useCallback(() => {
@@ -1077,16 +1077,12 @@ export function useTrainSimulation(infraData: InfraSchema | null) {
   const startSimulation = () => setIsRunning(true);
   const stopSimulation = () => setIsRunning(false);
   const addTrain = (route: TrainRoute, customDwellTime?: number) => {
-    if (trainManager) {
-      trainManager.addTrain(route, customDwellTime ?? dwellTime);
-      setTrains(trainManager.getAllTrains());
-    }
+    trainManager.addTrain(route, customDwellTime ?? dwellTime);
+    setTrains(trainManager.getAllTrains());
   };
   const clearTrains = () => {
-    if (trainManager) {
-      trainManager.clearAllTrains();
-      setTrains([]);
-    }
+    trainManager.clearAllTrains();
+    setTrains([]);
   };
 
   // Custom setDwellTime function that updates all existing trains
@@ -1095,13 +1091,11 @@ export function useTrainSimulation(infraData: InfraSchema | null) {
       setDwellTime(newDwellTime);
 
       // Update dwell time for all existing trains
-      if (trainManager) {
-        trainManager.getAllTrains().forEach((train) => {
-          train.stopDwellTime = newDwellTime;
-        });
-        // Update the trains state to reflect the changes
-        setTrains(trainManager.getAllTrains());
-      }
+      trainManager.getAllTrains().forEach((train) => {
+        train.stopDwellTime = newDwellTime;
+      });
+      // Update the trains state to reflect the changes
+      setTrains(trainManager.getAllTrains());
     },
     [trainManager]
   );
@@ -1175,5 +1169,6 @@ export function useTrainSimulation(infraData: InfraSchema | null) {
     selectedTrain,
     selectTrain,
     getSelectedTrainRoute,
+    trackGeoJSON,
   };
 }

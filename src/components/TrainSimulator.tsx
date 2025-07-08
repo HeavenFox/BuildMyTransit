@@ -8,14 +8,12 @@ import { useState, useMemo } from "react";
 import { useAtomValue } from "jotai";
 import { userRoutesAtom } from "../store/routeStore";
 import { Infra, TrainRoute } from "../hooks/useTrainSimulation";
-import type { InfraSchema, ServiceSchema } from "../hooks/useSubwayData";
+import type { ServiceSchema } from "../hooks/useSubwayData";
 import { RouteListItem } from "./RouteListItem";
 import { Button } from "./ui/button";
 
 interface TrainSimulatorProps {
-  data: InfraSchema | null;
-  services: ServiceSchema | null;
-  waysGeoJSON: GeoJSON.FeatureCollection | null;
+  services: ServiceSchema;
   stationsGeoJSON: GeoJSON.FeatureCollection | null;
   infra: Infra;
   onModeChange: () => void;
@@ -58,9 +56,7 @@ function Bullet({
 }
 
 export function TrainSimulator({
-  data,
   services,
-  waysGeoJSON,
   stationsGeoJSON,
   infra,
   onModeChange,
@@ -69,14 +65,14 @@ export function TrainSimulator({
 
   // Convert user routes to TrainRoute objects
   const userTrainRoutes = useMemo(() => {
-    if (!data || !userRoutes) return [];
+    if (!userRoutes) return [];
 
     return userRoutes.map((userRoute) =>
       TrainRoute.fromUserRoute(infra, userRoute)
     );
-  }, [data, userRoutes, infra]);
+  }, [userRoutes, infra]);
 
-  const routes = useMemo(() => {
+  const officialRoutes = useMemo(() => {
     if (!services || !infra) return [];
     const serviceRoutes = services.services.map((service) =>
       TrainRoute.fromService(infra, service)
@@ -99,16 +95,17 @@ export function TrainSimulator({
     selectedTrain,
     selectTrain,
     getSelectedTrainRoute,
-  } = useTrainSimulation(data);
+    trackGeoJSON,
+  } = useTrainSimulation(infra, officialRoutes);
 
   const [expandedBullet, setExpandedBullet] = useState<string | null>(null);
 
   // Group routes by bullet (including user routes)
   const routesByBullet = useMemo(() => {
-    if (!routes) return {};
+    if (!officialRoutes) return {};
 
-    const grouped: { [bullet: string]: typeof routes } = {};
-    routes.forEach((route) => {
+    const grouped: { [bullet: string]: typeof officialRoutes } = {};
+    officialRoutes.forEach((route) => {
       if (!grouped[route.bullet]) {
         grouped[route.bullet] = [];
       }
@@ -116,18 +113,18 @@ export function TrainSimulator({
     });
 
     return grouped;
-  }, [routes]);
+  }, [officialRoutes]);
 
   // Add train from specific route
-  const addTrainFromRoute = (route: (typeof routes)[0]) => {
+  const addTrainFromRoute = (route: (typeof officialRoutes)[0]) => {
     addTrain(route);
   };
 
   const addRandomTrain = () => {
-    if (routes && routes.length > 0) {
+    if (officialRoutes && officialRoutes.length > 0) {
       // Select a random route from the available services
-      const randomIndex = Math.floor(Math.random() * routes.length);
-      const randomRoute = routes[randomIndex];
+      const randomIndex = Math.floor(Math.random() * officialRoutes.length);
+      const randomRoute = officialRoutes[randomIndex];
       // Add a train using the selected route
       addTrain(randomRoute);
     }
@@ -145,9 +142,9 @@ export function TrainSimulator({
     id: "subway-ways",
     type: "line",
     paint: {
-      "line-color": "#3b82f6",
-      "line-width": 2,
-      "line-opacity": 0.8,
+      "line-color": ["coalesce", ["get", "color"], "#111111"],
+      "line-width": ["case", ["to-boolean", ["get", "color"]], 2, 1],
+      "line-opacity": ["case", ["to-boolean", ["get", "color"]], 0.8, 0.5],
     },
   };
 
@@ -488,8 +485,8 @@ export function TrainSimulator({
         interactiveLayerIds={["trains"]}
       >
         {/* Render subway ways */}
-        {waysGeoJSON && (
-          <Source id="subway-ways" type="geojson" data={waysGeoJSON}>
+        {trackGeoJSON && (
+          <Source id="subway-ways" type="geojson" data={trackGeoJSON}>
             <Layer {...waysLayerStyle} />
           </Source>
         )}
