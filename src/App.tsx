@@ -27,7 +27,7 @@ function App() {
     );
   }
 
-  if (!infra) {
+  if (!infra || !services) {
     return (
       <div className="w-full h-screen flex items-center justify-center">
         <p className="text-lg">Initializing infrastructure...</p>
@@ -40,9 +40,7 @@ function App() {
       {/* Render the appropriate mode */}
       {mode === "simulator" ? (
         <TrainSimulator
-          data={data}
           services={services}
-          waysGeoJSON={waysGeoJSON}
           stationsGeoJSON={stationsGeoJSON}
           infra={infra}
           onModeChange={() => setMode("designer")}
